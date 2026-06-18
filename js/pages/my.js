@@ -113,34 +113,26 @@ export async function addMyAccount() {
       </label>
       <div>
         <span class="text-xs text-gray-400">数据源（可多选）</span>
-        <div class="mt-1 space-y-2">
-          <label class="flex items-start gap-2 p-2 rounded-lg bg-white/[0.02] cursor-pointer hover:bg-white/[0.04]">
-            <input type="checkbox" name="my-source" value="redfox" class="mt-0.5" checked>
-            <div class="text-xs flex-1">
-              <div class="font-medium">关联账号追踪（RedFox）</div>
-              <div class="text-gray-500 mt-0.5">从「账号追踪」选择已添加的账号，自动用 RedFox 抓取的作品作为风格源</div>
-            </div>
+        <div class="mt-1 flex gap-2">
+          <label class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/[0.03] cursor-pointer text-xs hover:bg-white/[0.06]">
+            <input type="checkbox" name="my-source" value="redfox" checked>
+            <i data-lucide="radar" class="w-3.5 h-3.5"></i> RedFox
           </label>
-          <div id="my-add-source-redfox" class="ml-6 space-y-1">
-            <label class="block">
-              <span class="text-xs text-gray-400">关联追踪账号</span>
-              <select class="input mt-1" id="my-add-tracker">
-                <option value="">（请先在「账号追踪」添加）</option>
-              </select>
-            </label>
+          <label class="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-white/[0.03] cursor-pointer text-xs hover:bg-white/[0.06]">
+            <input type="checkbox" name="my-source" value="kb">
+            <i data-lucide="book-open" class="w-3.5 h-3.5"></i> 知识库
+          </label>
+        </div>
+        <div class="mt-2 space-y-2">
+          <div id="my-add-source-redfox" class="space-y-1 p-2 rounded-md bg-white/[0.02]">
+            <div class="text-[11px] text-gray-500">RedFox：从「账号追踪」选择已添加的账号，自动用其作品作为风格源</div>
+            <select class="input py-1 text-xs" id="my-add-tracker">
+              <option value="">（请先在「账号追踪」添加）</option>
+            </select>
           </div>
-          <label class="flex items-start gap-2 p-2 rounded-lg bg-white/[0.02] cursor-pointer hover:bg-white/[0.04]">
-            <input type="checkbox" name="my-source" value="kb" class="mt-0.5">
-            <div class="text-xs flex-1">
-              <div class="font-medium">关联知识库（Obsidian / Notion）</div>
-              <div class="text-gray-500 mt-0.5">手动选择知识库条目（逗号分隔 entry key）作为风格源</div>
-            </div>
-          </label>
-          <div id="my-add-source-kb" class="ml-6 space-y-1 hidden">
-            <label class="block">
-              <span class="text-xs text-gray-400">知识库条目 key（逗号分隔，最多 5 个）</span>
-              <input class="input mt-1" id="my-add-kb-keys" placeholder="例：path/to/note1.md, page-id-2">
-            </label>
+          <div id="my-add-source-kb" class="space-y-1 p-2 rounded-md bg-white/[0.02] hidden">
+            <div class="text-[11px] text-gray-500">知识库：手动指定条目 key（逗号分隔，最多 5 个）</div>
+            <input class="input py-1 text-xs" id="my-add-kb-keys" placeholder="例：path/to/note1.md, page-id-2">
           </div>
         </div>
       </div>

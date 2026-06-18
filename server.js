@@ -1088,11 +1088,15 @@ async function extractAccountTracks(account) {
   if (!samples.titles.length) throw new Error('该账号暂无作品数据，请先在「账号追踪」同步或关联知识库条目');
   const titles = samples.titles.slice(0, 30).map((t, i) => `${i + 1}. ${t}`).join('\n');
   const messages = [
-    { role: 'system', content: '你是创作赛道分析师。基于账号的作品标题列表，提炼出 3-5 个赛道标签。赛道标签应当是简短的中文短语（如"AI 教程"、"NAS 玩法"、"情感共鸣"），反映此账号主要创作主题。返回 JSON 数组，每个元素是一个字符串。' },
-    { role: 'user', content: `账号名称：${account.name}（${account.plat}）\n\n作品标题：\n${titles}\n\n请提炼 3-5 个赛道标签，JSON 数组格式：["...", "..."]` },
+    { role: 'system', content: '你是创作赛道分析师。基于账号的作品标题列表，提炼出 3-5 个赛道标签。赛道标签应当是简短的中文短语（如"AI 教程"、"NAS 玩法"、"情感共鸣"），反映此账号主要创作主题。严格输出 JSON 对象：{"tracks": ["...", "..."]}' },
+    { role: 'user', content: `账号名称：${account.name}（${account.plat}）\n\n作品标题：\n${titles}\n\n请提炼 3-5 个赛道标签，严格输出 JSON：{"tracks": ["...", "..."]}` },
   ];
   const result = await callLlmJson(messages);
-  const tracks = Array.isArray(result) ? result : (result?.tracks || result?.data || []);
+  const tracks = Array.isArray(result) ? result
+    : Array.isArray(result?.tracks) ? result.tracks
+    : Array.isArray(result?.data) ? result.data
+    : Array.isArray(result?.赛道) ? result.赛道
+    : [];
   return tracks.slice(0, 5).map(t => String(t).trim()).filter(Boolean);
 }
 
