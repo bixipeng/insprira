@@ -3526,16 +3526,21 @@ async function rewriteForPlatform(body) {
   const hotspotInstruction = hotspot?.title
     ? `选定热点：${hotspot.title}（${hotspot.platformName}）。可用关联角度：${hotspot.angle || '自行判断'}。热点主要用于标题和前言，正文不得为了关联而篡改原文事实；若关联牵强，应在标题和前言中弱化处理。`
     : '未选择热点，不要虚构或强行加入热点。';
-  // 平台对应的 rewrite skill 映射
-  const skillSlugMap = { '小红书': 'xiaohongshu-rewrite', '公众号': 'wechat-rewrite', '知乎': 'zhihu-rewrite' };
-  const skillSlug = skillSlugMap[platform];
+  // 平台对应的 rewrite skill 映射（multi-rewrite 覆盖抖音/视频号/快手/哔站）
+  const skillSlugMap = {
+    '小红书': 'xiaohongshu-rewrite',
+    '公众号': 'wechat-rewrite',
+    '知乎': 'zhihu-rewrite',
+    '抖音': 'multi-rewrite',
+    '视频号': 'multi-rewrite',
+    '快手': 'multi-rewrite',
+    '哔站': 'multi-rewrite',
+  };
+  const skillSlug = skillSlugMap[platform] || 'multi-rewrite';
   let skillInstruction = '';
-  if (skillSlug) {
-    const skill = getSkill(skillSlug);
-    if (skill?.description) {
-      // 取 description 前 300 字作为方法论提示
-      skillInstruction = `\n\n参考 RedFox ${skillSlug} skill 方法论（按此风格输出）：\n${String(skill.description).slice(0, 400)}`;
-    }
+  const skill = getSkill(skillSlug);
+  if (skill?.description) {
+    skillInstruction = `\n\n参考 RedFox ${skillSlug} skill 方法论（按此风格输出）：\n${String(skill.description).slice(0, 400)}`;
   }
   // 风格档案（来自「我的」账号）
   let styleInstruction = '';

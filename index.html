@@ -618,10 +618,15 @@
         <h3 class="text-sm font-semibold mb-3">③ 多平台输出</h3>
         <div class="flex items-center gap-2 mb-3 flex-wrap">
           <select class="input py-1.5 text-xs" id="rewritePlatform" style="width:auto">
-            <option value="小红书">小红书笔记</option>
-            <option value="公众号">公众号文章</option>
-            <option value="抖音">抖音口播稿</option>
+            <option value="小红书" data-skill="xiaohongshu-rewrite">小红书</option>
+            <option value="公众号" data-skill="wechat-rewrite">公众号</option>
+            <option value="知乎" data-skill="zhihu-rewrite">知乎</option>
+            <option value="抖音" data-skill="multi-rewrite">抖音</option>
+            <option value="视频号" data-skill="multi-rewrite">视频号</option>
+            <option value="快手" data-skill="multi-rewrite">快手</option>
+            <option value="哔站" data-skill="multi-rewrite">哔站</option>
           </select>
+          <span id="rewrite-skill-badge" class="pill pill-gray !text-[10px] !py-0.5 !px-1.5 hidden"></span>
           <select class="input py-1.5 text-xs" id="rewriteTone" style="width:auto">
             <option value="专业、清晰、有观点">专业观点</option>
             <option value="轻松、口语化、有生活感">轻松口语</option>

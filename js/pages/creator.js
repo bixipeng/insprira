@@ -15,7 +15,25 @@ const MODE_META = {
   adapt:   { label: '开始改写', hint: '改写模式：直接换风格，不补充新事实，仅风格转换、句式重组' },
 };
 
-function bindCreatorModeTabs() {
+function bindPlatformSkillBadge() {
+  const sel = document.getElementById('rewritePlatform');
+  const badge = document.getElementById('rewrite-skill-badge');
+  if (!sel || !badge || sel.dataset.bound) return;
+  sel.dataset.bound = '1';
+  const update = () => {
+    const opt = sel.selectedOptions[0];
+    const slug = opt?.dataset.skill;
+    if (slug) {
+      badge.classList.remove('hidden');
+      badge.innerHTML = `<i data-lucide="blocks" class="w-2.5 h-2.5"></i> ${slug}`;
+      initIcons(badge);
+    } else {
+      badge.classList.add('hidden');
+    }
+  };
+  sel.addEventListener('change', update);
+  update();
+}
   document.querySelectorAll('.creator-mode-tab').forEach(btn => {
     if (btn.dataset.bound) return;
     btn.dataset.bound = '1';
@@ -66,6 +84,7 @@ export function renderCreator() {
   initIcons(document.getElementById('content-area'));
   loadStyleProfiles();
   bindCreatorModeTabs();
+  bindPlatformSkillBadge();
 }
 
 async function loadStyleProfiles() {
