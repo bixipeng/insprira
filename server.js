@@ -534,6 +534,14 @@ db.exec(`
     updated_at INTEGER NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS skill_classifications (
+    slug TEXT PRIMARY KEY,
+    llm_category TEXT NOT NULL,
+    original_category TEXT,
+    analyzed_at INTEGER NOT NULL,
+    skill_signature TEXT
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
     username TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -1576,18 +1584,100 @@ function skillUpdateState() {
   return { ...state, newSlugs };
 }
 
+const LLM_SKILL_CATEGORIES = ['热点', '创作', '分析', '检索', '生成工具'];
+
+// Skill → 灵感熔炉 source 映射（"绑定到热榜"按钮用的）
+// 仅映射已被灵感熔炉支持的 source；未映射的 skill 即使分类为热点也不会显示绑定按钮
+const SKILL_TO_SOURCE = {
+  'gzh-ai-feed':  { sourceKey: 'ai-gzh',  label: 'AI 公众号', cronId: 'hot-daily-ai-gzh' },
+  'bili-ai-feed': { sourceKey: 'ai-bili', label: 'AI B站',    cronId: 'hot-daily-ai-bili' },
+  'xhs-ai-feed':  { sourceKey: 'ai-xhs',  label: 'AI 小红书', cronId: 'hot-daily-ai-xhs' },
+};
+
+function getSkillSourceBinding(slug) {
+  return SKILL_TO_SOURCE[slug] || null;
+}
+
+// 把 skill 绑定到热榜：启用 cron + 重新调度
+function bindSkillToSource(slug) {
+  const binding = getSkillSourceBinding(slug);
+  if (!binding) throw new Error(`Skill ${slug} 暂未配置绑定映射`);
+  const cronRow = db.prepare('SELECT id, enabled, cron_expr, task_type, task_config FROM crontab WHERE id = ?').get(binding.cronId);
+  if (!cronRow) throw new Error(`找不到内置任务 ${binding.cronId}`);
+  const alreadyEnabled = Boolean(cronRow.enabled);
+  if (!alreadyEnabled) {
+    db.prepare('UPDATE crontab SET enabled = 1 WHERE id = ?').run(binding.cronId);
+    scheduleCronJob(binding.cronId, cronRow.cron_expr, cronRow.task_type, parseJson(cronRow.task_config) || {});
+  }
+  return { sourceKey: binding.sourceKey, cronId: binding.cronId, alreadyEnabled };
+}
+
+async function classifySkill(skill) {
+  const signature = `${skill.slug}|${skill.title}|${String(skill.description || '').slice(0, 200)}`;
+  const existing = db.prepare('SELECT * FROM skill_classifications WHERE slug = ?').get(skill.slug);
+  if (existing && existing.skill_signature === signature) {
+    return existing.llm_category;
+  }
+  const messages = [
+    {
+      role: 'system',
+      content: `你是一个 Skill 分类器。根据 skill 的名称、标题、描述，把它归入以下五类之一：
+- 热点：抓取/聚合某个主题的内容榜单、热榜、信息源（如 AI 公众号信息源、抖音热点、阅读榜）
+- 创作：辅助内容创作的工具（如文案改写、风格转换、标题生成）
+- 分析：分析账号/内容/数据的工具（如账号诊断、爆款分析、趋势分析）
+- 检索：搜索关键词/账号/文章的工具
+- 生成工具：生成图片/视频/封面等媒体内容的工具
+
+严格只输出一个类别名称（不要其他内容）。`,
+    },
+    {
+      role: 'user',
+      content: `slug: ${skill.slug}\n标题: ${skill.title}\n描述: ${skill.description || '(无)'}`,
+    },
+  ];
+  try {
+    const result = await callLlm(messages, { temperature: 0, maxTokens: 20 });
+    const cleaned = String(result || '').trim().split(/[\n，,。]/)[0];
+    if (LLM_SKILL_CATEGORIES.includes(cleaned)) {
+      const now = Date.now();
+      db.prepare(`
+        INSERT INTO skill_classifications (slug, llm_category, original_category, analyzed_at, skill_signature)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(slug) DO UPDATE SET
+          llm_category = excluded.llm_category,
+          original_category = excluded.original_category,
+          analyzed_at = excluded.analyzed_at,
+          skill_signature = excluded.skill_signature
+      `).run(skill.slug, cleaned, skill.category, now, signature);
+      return cleaned;
+    }
+  } catch (e) {
+    console.warn(`[skill] 分类失败 ${skill.slug}:`, e.message);
+  }
+  return existing?.llm_category || skill.category || '生成工具';
+}
+
 function listSkills() {
   if (!fs.existsSync(SKILLS_ROOT)) return [];
   const state = skillUpdateState();
+  const rows = db.prepare('SELECT slug, llm_category FROM skill_classifications').all();
+  const cache = new Map(rows.map(r => [r.slug, r.llm_category]));
   return fs.readdirSync(SKILLS_ROOT, { withFileTypes: true })
     .filter(entry => entry.isDirectory())
-    .map(entry => path.join(SKILLS_ROOT, entry.name, 'SKILL.md'))
-    .filter(file => fs.existsSync(file))
-    .map(file => {
-      const skill = parseSkillFile(file);
-      return { ...skill, isNew: state.newSlugs.has(skill.slug) };
+    .map(entry => {
+      const skillPath = path.join(SKILLS_ROOT, entry.name, 'SKILL.md');
+      if (!fs.existsSync(skillPath)) return null;
+      const skill = parseSkillFile(skillPath);
+      const stat = fs.statSync(skillPath);
+      return {
+        ...skill,
+        isNew: state.newSlugs.has(skill.slug),
+        llmCategory: cache.get(skill.slug) || null,
+        updatedAt: stat.mtimeMs || stat.ctimeMs || 0,
+      };
     })
-    .sort((a, b) => a.category.localeCompare(b.category, 'zh-CN') || a.title.localeCompare(b.title, 'zh-CN'));
+    .filter(Boolean)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
 }
 
 function getSkill(slug) {
@@ -5386,8 +5476,38 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
   if (url.pathname === '/api/_/skills' && req.method === 'GET') {
-    const skills = listSkills().map(({ content, ...skill }) => skill);
+    const skills = listSkills().map(({ content, ...skill }) => {
+      const binding = getSkillSourceBinding(skill.slug);
+      return {
+        ...skill,
+        sourceBinding: binding,
+        cronEnabled: binding ? Boolean(db.prepare('SELECT enabled FROM crontab WHERE id = ?').get(binding.cronId)?.enabled) : false,
+      };
+    });
     json(res, 200, { ok: true, data: skills });
+    return true;
+  }
+  // POST /api/_/skills/{slug}/bind-source  把热点 skill 绑定到热榜
+  const bindSkillMatch = url.pathname.match(/^\/api\/_\/skills\/([^/]+)\/bind-source$/);
+  if (bindSkillMatch && req.method === 'POST') {
+    const slug = decodeURIComponent(bindSkillMatch[1]);
+    try {
+      const result = bindSkillToSource(slug);
+      json(res, 200, { ok: true, data: result });
+    } catch (e) { json(res, 400, { ok: false, error: e.message }); }
+    return true;
+  }
+  // POST /api/_/skills/classify  批量调 LLM 分类所有 skill（用户主动触发）
+  if (url.pathname === '/api/_/skills/classify' && req.method === 'POST') {
+    const all = listSkills();
+    let done = 0, failed = 0;
+    for (const skill of all) {
+      try {
+        await classifySkill(skill);
+        done++;
+      } catch { failed++; }
+    }
+    json(res, 200, { ok: true, data: { total: all.length, done, failed } });
     return true;
   }
   if (url.pathname === '/api/_/skills/status' && req.method === 'GET') {

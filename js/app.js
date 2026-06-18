@@ -17,7 +17,7 @@ import { renderInspiration, renderInspirationCards, onInspirationFilterChange, t
 import { renderKnowledgebase, renderLibrary, addToLibrary, removeFromLibrary, exportLibrary, switchKbTab, switchKbSource, renderKbLibrary, loadKbEntries, renderKbGrid, renderKbFolderTree, searchKb, openKbEntry, openKbEntryModal, analyzeKbEntry, showKbAnalysisResult, reanalyzeKbEntry, matchKbToInspirations, renderMatchedInspirations, linkKbMatchByIndex, openKbConfigModal, saveKbConfig, createKbEntry, submitKbEntry, linkKbToInspiration, linkKbPickerByIndex, sendKbToCreator, renderWersss, openWersssConfig, saveWersssConfig, addWersssSub, loadWersssAvailable, selectWersssMp, searchWersssMp, confirmAddWersssSub, removeWersssSub, syncWersss, prefetchWersss, openWersssArticle, closeWersssArticleModal, selectKbFolder, toggleKbFolder } from './pages/knowledgebase.js';
 import { renderCreator, sendToCreator, doCheckWord, inspectSensitiveHtml, analyzeRewriteHotspots, openActionLogs, renderRewriteHotspots, selectRewriteHotspot, clearSelectedHotspot, doRewrite, copyRewrite, generateCover, clearCreatorSource } from './pages/creator.js';
 import { renderMyAccounts, addMyAccount, submitMyAccount, removeMyAccount, editMyAccount, extractMyTracks, extractMyStyle, viewMyStyle, presetMyInspirations, createAutoConfigs } from './pages/my.js';
-import { renderSkills, filterSkills, openSkillDetail, openAgentWithSkill, checkSkillUpdates, updateCommunitySkillsUi, renderAgent, loadAgentThreads, saveAgentThreads, startNewAgentThread, switchAgentThread, clearCurrentAgentThread, deleteAgentThread, renderAgentThreads, onAgentProviderChange, formatTime, copyAgentMessage, deleteAgentMessage, regenerateAgentMessage, toggleStreamingIndicator, handleAgentInputKeydown, renderAgentMessages, showSkillCommands, insertSkillCommand, sendAgentMessage, loadSkills, clearSkillCache } from './pages/agent.js';
+import { renderSkills, filterSkills, openSkillDetail, openAgentWithSkill, checkSkillUpdates, updateCommunitySkillsUi, renderAgent, loadAgentThreads, saveAgentThreads, startNewAgentThread, switchAgentThread, clearCurrentAgentThread, deleteAgentThread, renderAgentThreads, onAgentProviderChange, formatTime, copyAgentMessage, deleteAgentMessage, regenerateAgentMessage, toggleStreamingIndicator, handleAgentInputKeydown, renderAgentMessages, showSkillCommands, insertSkillCommand, sendAgentMessage, loadSkills, clearSkillCache, bindSkillToSource, classifySkills } from './pages/agent.js';
 import { gotoPage, refreshCurrent, doGlobalSearch, toggleSidebar, openMobileSidebar, closeMobileSidebar } from './router.js';
 import { initErrorBoundary } from './errorBoundary.js';
 import { loadCurrentAccount, openAccountModal, saveAccountProfile, changeAccountPassword, logoutAccount } from './account.js';
@@ -328,6 +328,8 @@ registerAction('generateCover', () => generateCover());
 registerAction('selectRewriteHotspot', (_, d) => selectRewriteHotspot(Number(d.index)));
 registerAction('openSkillDetail', (_, d) => openSkillDetail(d.slug));
 registerAction('openAgentWithSkill', (_, d) => openAgentWithSkill(d.slug));
+registerAction('bindSkillToSource', (el, d) => bindSkillToSource(el, d));
+registerAction('classifySkills', () => classifySkills());
 registerAction('checkSkillUpdates', () => checkSkillUpdates(true));
 registerAction('updateCommunitySkills', () => updateCommunitySkillsUi());
 registerAction('closeModalAndOpenAgentWithSkill', (el, d) => { el.closest('.modal-mask')?.remove(); openAgentWithSkill(d.slug); });

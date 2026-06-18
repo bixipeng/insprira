@@ -46,20 +46,56 @@ export function filterSkills() {
   const keyword = document.getElementById('skillSearch')?.value.trim().toLowerCase() || '';
   const category = document.getElementById('skillCategory')?.value || 'all';
   const filtered = skillCache.filter(skill => {
-    const matchesCategory = category === 'all' || skill.category === category;
+    const cat = skill.llmCategory || skill.category || '其他';
+    const matchesCategory = category === 'all' || cat === category || skill.category === category;
     return matchesCategory && (!keyword || `${skill.title} ${skill.name} ${skill.description}`.toLowerCase().includes(keyword));
   });
-  grid.innerHTML = filtered.map(skill => `
+  grid.innerHTML = filtered.map(skill => {
+    const cat = skill.llmCategory || skill.category || '其他';
+    const catColor = { '热点': 'pill-hot', '创作': 'pill-brand', '分析': 'pill-sky', '检索': 'pill-green', '生成工具': 'pill-amber' }[cat] || 'pill-gray';
+    const bindable = skill.llmCategory === '热点' && skill.sourceBinding;
+    const bindBtn = bindable
+      ? `<button class="btn ${skill.cronEnabled ? 'btn-ghost' : 'btn-primary'} py-1 text-[11px] flex-shrink-0" data-action="bindSkillToSource" data-slug="${esc(skill.slug)}" data-stop-propagation title="${skill.cronEnabled ? '已在热榜中' : '启用对应的定时任务'}">
+          <i data-lucide="${skill.cronEnabled ? 'check' : 'plus'}" class="w-3 h-3"></i>${skill.cronEnabled ? '已绑定' : '绑定热榜'}
+        </button>`
+      : '';
+    return `
     <div class="glass rounded-xl p-4 card flex flex-col relative" data-action="openSkillDetail" data-slug="${skill.slug}">
       ${skill.isNew ? '<span class="absolute -top-2 -right-2 pill pill-green shadow-lg">New</span>' : ''}
-      <div class="flex items-start justify-between gap-3"><div class="font-semibold text-sm">${esc(skill.title)}</div><span class="tag">${esc(skill.category)}</span></div>
-      <p class="text-xs text-gray-500 mt-2 line-clamp-2 flex-1">${esc(skill.description || '暂无描述')}</p>
-      <div class="flex items-center justify-between mt-4">
-        <code class="text-[10px] text-gray-600">${esc(skill.slug)}</code>
-        <button class="btn btn-ghost py-1 text-[11px]" data-action="openAgentWithSkill" data-slug="${skill.slug}"><i data-lucide="bot" class="w-3 h-3"></i>交给 Agent</button>
+      <div class="flex items-start justify-between gap-3">
+        <div class="font-semibold text-sm">${esc(skill.title)}</div>
+        <span class="pill ${catColor} !text-[10px]">${esc(cat)}</span>
       </div>
-    </div>`).join('') || '<div class="text-sm text-gray-500">没有匹配的 Skill</div>';
+      <p class="text-xs text-gray-500 mt-2 line-clamp-2 flex-1">${esc(skill.description || '暂无描述')}</p>
+      <div class="flex items-center justify-between mt-4 gap-2">
+        <code class="text-[10px] text-gray-600 truncate flex-1">${esc(skill.slug)}</code>
+        ${bindBtn}
+        <button class="btn btn-ghost py-1 text-[11px] flex-shrink-0" data-action="openAgentWithSkill" data-slug="${skill.slug}"><i data-lucide="bot" class="w-3 h-3"></i>Agent</button>
+      </div>
+    </div>`;
+  }).join('') || '<div class="text-sm text-gray-500">没有匹配的 Skill</div>';
   initIcons(document.getElementById('content-area'));
+}
+
+export async function bindSkillToSource(el, d) {
+  if (!d?.slug) return;
+  try {
+    const result = await localApi(`skills/${encodeURIComponent(d.slug)}/bind-source`, { method: 'POST' });
+    toast(result.alreadyEnabled ? `${d.slug} 已在热榜中` : `已绑定到热榜（${result.cronId}）`, 'success');
+    await loadSkills(true);
+    filterSkills();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function classifySkills() {
+  if (!confirm('将调用 LLM 给所有 skill 自动分类（耗时约 30-90 秒），确认开始？')) return;
+  toast('正在用 LLM 分类所有 skill…', 'info');
+  try {
+    const result = await localApi('skills/classify', { method: 'POST' });
+    toast(`分类完成：${result.done}/${result.total} 成功${result.failed ? `，失败 ${result.failed}` : ''}`, 'success');
+    await loadSkills(true);
+    filterSkills();
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 function renderSkillUpdateStatus() {
