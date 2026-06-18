@@ -37,6 +37,11 @@ function renderAccountCard(a) {
     ? `✓ 已提炼（${a.styleUpdatedAt ? new Date(a.styleUpdatedAt).toLocaleDateString('zh-CN') : ''}）`
     : '未提炼';
   const avatar = proxyImage(a.avatar);
+  // 数据源描述（支持多源）
+  const sources = [];
+  if (a.trackerId) sources.push('RedFox');
+  if (a.styleSourceRef) sources.push(`知识库（${a.styleSourceRef.split(',').filter(Boolean).length} 条）`);
+  const sourceDesc = sources.length ? sources.join(' + ') : '未指定数据源';
   return `
   <div class="glass rounded-xl p-4 flex flex-col gap-3" data-account-id="${esc(a.id)}">
     <div class="flex items-start gap-3">
@@ -46,7 +51,7 @@ function renderAccountCard(a) {
           <span class="font-semibold text-sm truncate">${esc(a.name)}</span>
           <span class="pill ${a.plat === 'dy' ? 'pill-hot' : a.plat === 'xhs' ? 'pill-brand' : 'pill-green'}">${platName(a.plat)}</span>
         </div>
-        <div class="text-[11px] text-gray-500 mt-0.5 truncate">${esc(a.styleSource === 'kb' ? '来源：知识库' : a.styleSource === 'redfox' ? '来源：RedFox' : '未指定数据源')}</div>
+        <div class="text-[11px] text-gray-500 mt-0.5 truncate">${esc(sourceDesc)}</div>
       </div>
       <button class="btn btn-ghost py-0.5 px-1.5 text-xs text-gray-500 hover:text-red-400" data-action="removeMyAccount" data-id="${esc(a.id)}" title="删除"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
     </div>
@@ -107,37 +112,37 @@ export async function addMyAccount() {
         <input class="input mt-1" id="my-add-name" placeholder="账号昵称">
       </label>
       <div>
-        <span class="text-xs text-gray-400">数据源</span>
+        <span class="text-xs text-gray-400">数据源（可多选）</span>
         <div class="mt-1 space-y-2">
           <label class="flex items-start gap-2 p-2 rounded-lg bg-white/[0.02] cursor-pointer hover:bg-white/[0.04]">
-            <input type="radio" name="my-source" value="redfox" class="mt-0.5" checked>
-            <div class="text-xs">
+            <input type="checkbox" name="my-source" value="redfox" class="mt-0.5" checked>
+            <div class="text-xs flex-1">
               <div class="font-medium">关联账号追踪（RedFox）</div>
               <div class="text-gray-500 mt-0.5">从「账号追踪」选择已添加的账号，自动用 RedFox 抓取的作品作为风格源</div>
             </div>
           </label>
+          <div id="my-add-source-redfox" class="ml-6 space-y-1">
+            <label class="block">
+              <span class="text-xs text-gray-400">关联追踪账号</span>
+              <select class="input mt-1" id="my-add-tracker">
+                <option value="">（请先在「账号追踪」添加）</option>
+              </select>
+            </label>
+          </div>
           <label class="flex items-start gap-2 p-2 rounded-lg bg-white/[0.02] cursor-pointer hover:bg-white/[0.04]">
-            <input type="radio" name="my-source" value="kb" class="mt-0.5">
-            <div class="text-xs">
+            <input type="checkbox" name="my-source" value="kb" class="mt-0.5">
+            <div class="text-xs flex-1">
               <div class="font-medium">关联知识库（Obsidian / Notion）</div>
               <div class="text-gray-500 mt-0.5">手动选择知识库条目（逗号分隔 entry key）作为风格源</div>
             </div>
           </label>
+          <div id="my-add-source-kb" class="ml-6 space-y-1 hidden">
+            <label class="block">
+              <span class="text-xs text-gray-400">知识库条目 key（逗号分隔，最多 5 个）</span>
+              <input class="input mt-1" id="my-add-kb-keys" placeholder="例：path/to/note1.md, page-id-2">
+            </label>
+          </div>
         </div>
-      </div>
-      <div id="my-add-source-redfox" class="space-y-1">
-        <label class="block">
-          <span class="text-xs text-gray-400">关联追踪账号</span>
-          <select class="input mt-1" id="my-add-tracker">
-            <option value="">（请先在「账号追踪」添加）</option>
-          </select>
-        </label>
-      </div>
-      <div id="my-add-source-kb" class="space-y-1 hidden">
-        <label class="block">
-          <span class="text-xs text-gray-400">知识库条目 key（逗号分隔，最多 5 个）</span>
-          <input class="input mt-1" id="my-add-kb-keys" placeholder="例：path/to/note1.md, page-id-2">
-        </label>
       </div>
     </div>
     <div class="flex justify-end gap-2 mt-5">
@@ -155,32 +160,39 @@ export async function addMyAccount() {
       `<option value="${esc(t.id)}" data-name="${esc(t.name)}" data-plat="${esc(t.plat)}" data-avatar="${esc(t.gzhAvatar || t.avatar || '')}">${esc(t.name)} · ${platName(t.plat)}</option>`
     ).join('');
   } catch {}
-  // 切换数据源时显示对应区域
-  modal.querySelectorAll('input[name="my-source"]').forEach(r => {
-    r.addEventListener('change', () => {
-      modal.querySelector('#my-add-source-redfox').classList.toggle('hidden', r.value !== 'redfox' && !Array.from(modal.querySelectorAll('input[name="my-source"]:checked')).some(x => x.value === 'redfox'));
-      modal.querySelector('#my-add-source-kb').classList.toggle('hidden', !Array.from(modal.querySelectorAll('input[name="my-source"]:checked')).some(x => x.value === 'kb'));
-    });
-  });
+  // 切换数据源时显示对应配置区
+  const syncSourceSections = () => {
+    const checked = Array.from(modal.querySelectorAll('input[name="my-source"]:checked')).map(x => x.value);
+    modal.querySelector('#my-add-source-redfox').classList.toggle('hidden', !checked.includes('redfox'));
+    modal.querySelector('#my-add-source-kb').classList.toggle('hidden', !checked.includes('kb'));
+  };
+  modal.querySelectorAll('input[name="my-source"]').forEach(r => r.addEventListener('change', syncSourceSections));
+  syncSourceSections();
 }
 
 export async function submitMyAccount() {
   const plat = document.getElementById('my-add-plat').value;
   const name = document.getElementById('my-add-name').value.trim();
   if (!name) { toast('请填写账号名称', 'error'); return; }
-  const source = document.querySelector('input[name="my-source"]:checked')?.value || 'redfox';
+  const checked = Array.from(document.querySelectorAll('input[name="my-source"]:checked')).map(x => x.value);
+  if (!checked.length) { toast('至少选择一个数据源', 'error'); return; }
   const trackerSel = document.getElementById('my-add-tracker');
   const trackerId = trackerSel?.value || '';
   const trackerOpt = trackerSel?.selectedOptions[0];
   const kbKeys = document.getElementById('my-add-kb-keys')?.value.trim() || '';
+  if (checked.includes('redfox') && !trackerId) { toast('RedFox 数据源需要选择关联的追踪账号', 'error'); return; }
+  if (checked.includes('kb') && !kbKeys) { toast('知识库数据源需要填写 entry key', 'error'); return; }
   const body = {
     plat,
     name,
     trackerId: trackerId || null,
     avatar: trackerOpt?.dataset.avatar || '',
-    styleSource: source,
-    styleSourceRef: source === 'kb' ? kbKeys : '',
+    styleSource: checked.join(','),  // 'redfox', 'kb', 或 'redfox,kb'
+    styleSourceRef: kbKeys,
   };
+  // 编辑模式：带上 id
+  const editId = document.getElementById('my-add-plat')?.dataset.editId;
+  if (editId) body.id = editId;
   try {
     await localApi('my-accounts', { method: 'POST', body });
     toast('已添加', 'success');
@@ -207,15 +219,22 @@ export async function editMyAccount(el, d) {
     await addMyAccount();
     document.getElementById('my-add-plat').value = a.plat;
     document.getElementById('my-add-name').value = a.name;
-    if (a.trackerId) document.getElementById('my-add-tracker').value = a.trackerId;
-    if (a.styleSource === 'kb') {
-      document.querySelector('input[name="my-source"][value="kb"]').checked = true;
-      document.getElementById('my-add-source-kb').classList.remove('hidden');
-      document.getElementById('my-add-kb-keys').value = a.styleSourceRef || '';
+    if (a.trackerId) {
+      document.getElementById('my-add-tracker').value = a.trackerId;
+    } else {
+      // 没关联 tracker 时取消 RedFox 勾选
+      document.querySelector('input[name="my-source"][value="redfox"]').checked = false;
     }
-    // 改提交逻辑为更新
-    const submitBtn = document.querySelector('[data-action="submitMyAccount"]');
-    submitBtn.dataset.editId = a.id;
+    if (a.styleSourceRef) {
+      document.querySelector('input[name="my-source"][value="kb"]').checked = true;
+      document.getElementById('my-add-kb-keys').value = a.styleSourceRef;
+    } else {
+      document.querySelector('input[name="my-source"][value="kb"]').checked = false;
+    }
+    // 触发 change 让对应区域显示
+    document.querySelectorAll('input[name="my-source"]').forEach(r => r.dispatchEvent(new Event('change')));
+    // 改提交逻辑为更新（带 id）
+    document.getElementById('my-add-plat').dataset.editId = a.id;
   } catch (e) { toast(e.message, 'error'); }
 }
 
