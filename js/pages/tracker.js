@@ -3,6 +3,14 @@ import { LS, currentPage, getSortedTrackers, setTrackerOrder } from '../state.js
 import { esc, fmt, proxyImage, copyToClipboard, renderMarkdown } from '../utils.js';
 import { platName } from '../config.js';
 import { toast } from '../components.js';
+
+const randomUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+};
 import { initIcons } from '../icons.js';
 import { adaptDY, adaptXHS, adaptGZH } from '../core/adapters.js';
 import { renderFeedAndHistory } from './dashboard.js';
@@ -324,7 +332,7 @@ export async function submitAddAccount() {
     ...existing,
     plat,
     name,
-    id: trackerId || crypto.randomUUID(),
+    id: trackerId || randomUUID(),
     accountId,
     group: group === 'other' ? '其他' : group,
     autoSync,
