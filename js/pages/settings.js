@@ -653,38 +653,33 @@ export async function loadAgentConfigs() {
 }
 
 function renderAgentConfigTable() {
-  const tbody = document.getElementById('agent-config-tbody');
-  if (!tbody) return;
+  const container = document.getElementById('agent-config-list');
+  if (!container) return;
   if (!_agentConfigsCache.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-gray-500">暂无 Agent 配置，点击"新建 Agent"创建</td></tr>';
+    container.innerHTML = '<div class="py-6 text-center text-gray-500 text-xs">暂无 Agent 配置，点击"新建 Agent"创建</div>';
     return;
   }
-  tbody.innerHTML = _agentConfigsCache.map(cfg => `
-    <tr class="border-b border-white/5 hover:bg-white/[0.02]">
-      <td class="py-2.5 px-2">
-        <div class="font-medium">${esc(cfg.name)}</div>
-        <div class="text-[10px] text-gray-500">${esc(cfg.id)}</div>
-      </td>
-      <td class="py-2.5 px-2 text-gray-300">${esc(cfg.agent_id)}</td>
-      <td class="py-2.5 px-2">
-        <code class="text-[10px] text-purple-300 bg-purple-500/10 px-1.5 py-0.5 rounded max-w-[180px] truncate block" title="${esc(cfg.url)}">${esc(cfg.url.replace(/^https?:\/\//, ''))}</code>
-      </td>
-      <td class="py-2.5 px-2">
-        <code class="text-[10px] text-cyan-300">${esc(cfg.token || '—')}</code>
-      </td>
-      <td class="py-2.5 px-2">
-        <span class="pill ${cfg.enabled && cfg.token ? 'pill-green' : 'pill-hot'}">${cfg.enabled && cfg.token ? '已启用' : (cfg.enabled ? '缺 Token' : '已禁用')}</span>
-      </td>
-      <td class="py-2.5 px-2 text-right">
-        <div class="flex gap-1 justify-end">
-          <button class="btn btn-ghost py-1 px-2 text-xs" data-action="editAgentConfig" data-id="${esc(cfg.id)}" title="编辑"><i data-lucide="pencil" class="w-3 h-3"></i></button>
-          <button class="btn btn-ghost py-1 px-2 text-xs ${cfg.enabled ? 'text-amber-400' : 'text-emerald-400'}" data-action="toggleAgentConfig" data-id="${esc(cfg.id)}" title="${cfg.enabled ? '禁用' : '启用'}"><i data-lucide="${cfg.enabled ? 'pause' : 'play'}" class="w-3 h-3"></i></button>
-          <button class="btn btn-ghost py-1 px-2 text-xs text-red-400" data-action="deleteAgentConfig" data-id="${esc(cfg.id)}" title="删除"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+  container.innerHTML = _agentConfigsCache.map(cfg => `
+    <div class="bg-white/[0.03] border border-white/5 rounded-lg p-3 flex items-center gap-3 group hover:bg-white/[0.05] transition-colors">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="font-medium text-sm">${esc(cfg.name)}</span>
+          <span class="pill ${cfg.enabled && cfg.token ? 'pill-green' : 'pill-hot'}">${cfg.enabled && cfg.token ? '已启用' : (cfg.enabled ? '缺 Token' : '已禁用')}</span>
         </div>
-      </td>
-    </tr>
+        <div class="flex items-center gap-3 text-[10px] text-gray-500">
+          <span>ID: <code class="text-gray-400">${esc(cfg.id)}</code></span>
+          <span>Agent: <code class="text-purple-300">${esc(cfg.agent_id)}</code></span>
+          <span class="truncate">网关: <code class="text-cyan-300" title="${esc(cfg.url)}">${esc(cfg.url.replace(/^https?:\/\//, ''))}</code></span>
+        </div>
+      </div>
+      <div class="flex gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button class="btn btn-ghost py-1 px-1.5 text-xs" data-action="editAgentConfig" data-id="${esc(cfg.id)}" title="编辑"><i data-lucide="pencil" class="w-3 h-3"></i></button>
+        <button class="btn btn-ghost py-1 px-1.5 text-xs ${cfg.enabled ? 'text-amber-400' : 'text-emerald-400'}" data-action="toggleAgentConfig" data-id="${esc(cfg.id)}" title="${cfg.enabled ? '禁用' : '启用'}"><i data-lucide="${cfg.enabled ? 'pause' : 'play'}" class="w-3 h-3"></i></button>
+        <button class="btn btn-ghost py-1 px-1.5 text-xs text-red-400" data-action="deleteAgentConfig" data-id="${esc(cfg.id)}" title="删除"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+      </div>
+    </div>
   `).join('');
-  initIcons(tbody);
+  initIcons(container);
 }
 
 export function openAgentConfigModal(editId = '') {

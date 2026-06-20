@@ -821,8 +821,9 @@
       <div class="page-header-sub">API Key、Agent 配置、定时任务、通知渠道与自动选题配置</div>
     </div>
   </div>
-  <div class="grid grid-cols-1 xl:grid-cols-3 gap-5 items-stretch">
-  <div class="glass rounded-xl p-4 min-w-0 h-[240px] flex flex-col">
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 items-stretch">
+  <!-- 自动选题主题 -->
+  <div class="glass rounded-xl p-4 min-w-0 h-[320px] flex flex-col">
     <div class="settings-card-head">
       <div class="min-w-0">
         <h2 class="settings-card-title"><i data-lucide="timer" class="w-4 h-4 text-cyan-400"></i>自动选题主题</h2>
@@ -832,7 +833,19 @@
     </div>
     <div id="inspiration-config-list" class="space-y-3 overflow-y-auto scrollbar-thin pr-1 flex-1 min-h-0"></div>
   </div>
-  <div class="glass rounded-xl p-4 min-w-0 h-[240px] flex flex-col">
+  <!-- Agent 配置 -->
+  <div class="glass rounded-xl p-4 min-w-0 h-[320px] flex flex-col">
+    <div class="settings-card-head mb-3">
+      <div class="min-w-0">
+        <h2 class="settings-card-title"><i data-lucide="bot" class="w-4 h-4 text-cyan-400"></i>Agent 配置</h2>
+        <p class="text-[11px] text-gray-500 mt-1">对接已部署的 Agent 网关，配置即时生效，无需重启。</p>
+      </div>
+      <button class="btn btn-primary py-1.5 px-2.5 text-xs flex-shrink-0" data-action="openAgentConfigModal"><i data-lucide="plus" class="w-3.5 h-3.5"></i>新建 Agent</button>
+    </div>
+    <div id="agent-config-list" class="space-y-2 overflow-y-auto scrollbar-thin pr-1 flex-1 min-h-0"></div>
+  </div>
+  <!-- API Key 与环境 -->
+  <div class="glass rounded-xl p-4 min-w-0 h-[320px] flex flex-col">
     <div class="settings-card-head"><h2 class="settings-card-title"><i data-lucide="key" class="w-4 h-4 text-purple-400"></i>API Key 与环境</h2><div class="flex gap-1.5 flex-shrink-0"><button class="btn btn-ghost py-1.5 px-2.5 text-xs" data-action="openEnvModal"><i data-lucide="settings" class="w-3.5 h-3.5"></i>维护</button><button class="btn btn-ghost py-1.5 px-2.5 text-xs text-amber-300" data-action="restartService"><i data-lucide="rotate-cw" class="w-3.5 h-3.5"></i>重启</button><button class="btn btn-ghost py-1.5 px-2.5 text-xs" data-action="openRedfoxApply"><i data-lucide="external-link" class="w-3.5 h-3.5"></i>申请 API</button></div></div>
     <div class="space-y-3 overflow-y-auto scrollbar-thin pr-1 flex-1 min-h-0">
       <p class="text-xs text-gray-400">密钥只从服务端 <code class="text-purple-300">.env</code> 读取，不再返回给浏览器。</p>
@@ -843,40 +856,14 @@
       </div>
     </div>
   </div>
-  <div class="glass rounded-xl p-4 min-w-0 h-[240px] flex flex-col">
+  <!-- API 额度与用量 -->
+  <div class="glass rounded-xl p-4 min-w-0 h-[320px] flex flex-col">
     <div class="settings-card-head">
       <h2 class="settings-card-title"><i data-lucide="gauge" class="w-4 h-4 text-amber-400"></i>API 额度与用量</h2>
       <button class="btn btn-ghost py-1.5 text-xs" data-action="loadQuota"><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>刷新</button>
     </div>
     <div id="quota-content" class="text-xs text-gray-500 overflow-y-auto scrollbar-thin pr-1 flex-1 min-h-0">读取中…</div>
   </div>
-  </div>
-  <!-- Agent 配置 -->
-  <div class="glass rounded-xl p-4 min-w-0">
-    <div class="settings-card-head mb-3">
-      <div class="min-w-0">
-        <h2 class="settings-card-title"><i data-lucide="bot" class="w-4 h-4 text-cyan-400"></i>Agent 配置</h2>
-        <p class="text-[11px] text-gray-500 mt-1">对接已部署的 Agent 网关（Openclaw / OpenAI 兼容 API），配置即时生效，无需重启。</p>
-      </div>
-      <button class="btn btn-primary py-1.5 px-2.5 text-xs flex-shrink-0" data-action="openAgentConfigModal"><i data-lucide="plus" class="w-3.5 h-3.5"></i>新建 Agent</button>
-    </div>
-    <div id="agent-config-list" class="overflow-x-auto">
-      <table class="w-full text-xs">
-        <thead>
-          <tr class="border-b border-white/10 text-gray-500">
-            <th class="text-left py-2 px-2 font-medium">名称</th>
-            <th class="text-left py-2 px-2 font-medium">Agent ID</th>
-            <th class="text-left py-2 px-2 font-medium">网关地址</th>
-            <th class="text-left py-2 px-2 font-medium">Token</th>
-            <th class="text-left py-2 px-2 font-medium">状态</th>
-            <th class="text-right py-2 px-2 font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody id="agent-config-tbody">
-          <tr><td colspan="6" class="py-6 text-center text-gray-500">读取中…</td></tr>
-        </tbody>
-      </table>
-    </div>
   </div>
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 items-stretch">
   <div class="glass rounded-xl p-5 min-w-0 h-[620px] flex flex-col">

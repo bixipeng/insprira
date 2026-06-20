@@ -593,7 +593,7 @@ db.exec(`
     name TEXT NOT NULL,
     url TEXT NOT NULL DEFAULT 'http://127.0.0.1:18789',
     token TEXT NOT NULL DEFAULT '',
-    agent_id TEXT NOT NULL DEFAULT 'openclaw/default',
+    agent_id TEXT NOT NULL DEFAULT 'openclaw/main',
     system_prompt TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at INTEGER NOT NULL,
@@ -611,7 +611,7 @@ if (oldCols.includes('base_url') && !oldCols.includes('url')) {
       name TEXT NOT NULL,
       url TEXT NOT NULL DEFAULT 'http://127.0.0.1:18789',
       token TEXT NOT NULL DEFAULT '',
-      agent_id TEXT NOT NULL DEFAULT 'openclaw/default',
+      agent_id TEXT NOT NULL DEFAULT 'openclaw/main',
       system_prompt TEXT NOT NULL DEFAULT '',
       enabled INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
@@ -2177,18 +2177,7 @@ function parseAgentJsonLines(output, role = 'assistant') {
 async function listLocalAgents() {
   const configs = db.prepare('SELECT * FROM agent_configs ORDER BY created_at ASC').all();
   if (!configs.length) {
-    // 回退：使用环境变量创建默认 agent
-    const hasToken = Boolean(process.env.OPENCLAW_TOKEN);
-    const url = process.env.OPENCLAW_URL || 'http://127.0.0.1:18789';
-    return [{
-      id: 'openclaw',
-      name: 'Openclaw · 默认',
-      family: 'Agent 网关',
-      agent_id: 'openclaw/default',
-      available: hasToken,
-      reason: hasToken ? '' : '未配置 OPENCLAW_TOKEN',
-      _fallback: true,
-    }];
+    return [];
   }
   return configs.map(c => ({
     id: c.id,
@@ -2214,7 +2203,7 @@ function createAgentConfig({ id, name, url, token, agentId, systemPrompt, enable
   const now = Date.now();
   db.prepare(`INSERT INTO agent_configs (id, name, url, token, agent_id, system_prompt, enabled, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
-    id, name, url || 'http://127.0.0.1:18789', token || '', agentId || 'openclaw/default',
+    id, name, url || 'http://127.0.0.1:18789', token || '', agentId || 'openclaw/main',
     systemPrompt || '', enabled ?? 1, now, now
   );
   return getAgentConfig(id);
@@ -3682,7 +3671,7 @@ async function callLlm(messages, options = {}) {
   const agentCfg = options.agentConfig || null;
   let token = agentCfg?.token || process.env.OPENCLAW_TOKEN;
   let url = (agentCfg?.url || process.env.OPENCLAW_URL || '').replace(/\/$/, '');
-  let model = agentCfg?.agent_id || 'openclaw/default';
+  let model = agentCfg?.agent_id || 'openclaw/main';
   // 回退：没有 Openclaw 网关配置时，使用传统 LLM_BASE_URL / LLM_API_KEY
   if (!token && process.env.LLM_API_KEY) {
     token = process.env.LLM_API_KEY;
@@ -3739,7 +3728,7 @@ async function callLlmStream(messages, options = {}) {
   const agentCfg = options.agentConfig || null;
   let token = agentCfg?.token || process.env.OPENCLAW_TOKEN;
   let url = (agentCfg?.url || process.env.OPENCLAW_URL || '').replace(/\/$/, '');
-  let model = agentCfg?.agent_id || 'openclaw/default';
+  let model = agentCfg?.agent_id || 'openclaw/main';
   // 回退：没有 Openclaw 网关配置时，使用传统 LLM_BASE_URL / LLM_API_KEY
   if (!token && process.env.LLM_API_KEY) {
     token = process.env.LLM_API_KEY;

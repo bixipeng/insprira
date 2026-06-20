@@ -20,7 +20,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
       # 可选：Openclaw Agent 网关配置
-      OPENCLAW_URL: ${OPENCLAW_URL:-http://127.0.0.1:18789}
+      OPENCLAW_URL: ${OPENCLAW_URL:-http://1panel.owmini.com:18789}
       OPENCLAW_TOKEN: ${OPENCLAW_TOKEN:-}
       # 可选：知识库加密密钥，首次设置后请勿修改
       KB_ENCRYPTION_KEY: ${KB_ENCRYPTION_KEY:-}
@@ -34,7 +34,6 @@ services:
       # 持久化 SQLite 数据库、日志和本地数据
       - ./data:/data
     networks:
-      - default
       - 1panel-network
 
 networks:

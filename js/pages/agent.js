@@ -652,6 +652,18 @@ export async function renderAgent() {
     agentCache = agentsResult.value;
     const select = document.getElementById('agentProvider');
     if (!select || !select.isConnected) return;
+    if (!agentCache.length) {
+      select.innerHTML = '<option value="" disabled selected>无可用 Agent · 请在设置中配置</option>';
+      currentAgentId = '';
+      const currentName = document.getElementById('agent-current-name');
+      if (currentName) currentName.textContent = '未配置 Agent';
+      renderAgentProviderStatus('');
+      agentMessages = [];
+      currentAgentThreadId = null;
+      renderAgentMessages();
+      renderAgentThreads();
+      return;
+    }
     select.innerHTML = agentCache.map(agent => `
       <option value="${esc(agent.id)}" ${agent.available ? '' : 'disabled'}>
         ${esc(agent.name)}${agent.agent_id ? ` · ${esc(agent.agent_id)}` : ''}${agent.available ? '' : ' · 不可用'}
