@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM node:22-slim
 
-# better-sqlite3 需要编译原生模块
+# better-sqlite3 需要编译原生模块；unzip 用于 SKILL 更新
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     ca-certificates \
     git \
+    unzip \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
