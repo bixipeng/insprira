@@ -1543,11 +1543,15 @@ function listActionLogs(limit = 100) {
   }));
 }
 
+const REDFOX_TIMEOUT = 60000;
+const REDFOX_MAX_RETRIES = 1;
+
 function redfoxRequest(endpoint, body = {}, query = '', method = 'POST') {
   if (!API_KEY) return Promise.reject(new Error('未配置 REDFOX_API_KEY'));
   if (!REDFOX_ENDPOINTS.has(endpoint)) return Promise.reject(new Error('不允许访问该 RedFox 端点'));
   const requestBody = method === 'GET' ? '' : JSON.stringify(body);
-  return new Promise((resolve, reject) => {
+
+  const makeRequest = (attempt) => new Promise((resolve, reject) => {
     const req = https.request({
       hostname: REDFOX_HOST,
       port: 443,
@@ -1561,17 +1565,31 @@ function redfoxRequest(endpoint, body = {}, query = '', method = 'POST') {
           'Content-Length': Buffer.byteLength(requestBody),
         } : {}),
       },
-      timeout: 30000,
+      timeout: REDFOX_TIMEOUT,
     }, response => {
       let data = '';
       response.on('data', chunk => { data += chunk; });
       response.on('end', () => resolve({ status: response.statusCode || 502, body: data }));
     });
-    req.on('timeout', () => req.destroy(new Error('RedFox 请求超时')));
+    req.on('timeout', () => req.destroy(new Error(`RedFox 请求超时（${REDFOX_TIMEOUT / 1000}s，第 ${attempt} 次尝试）`)));
     req.on('error', reject);
     if (requestBody) req.write(requestBody);
     req.end();
   });
+
+  const executeWithRetry = async () => {
+    for (let attempt = 1; attempt <= REDFOX_MAX_RETRIES + 1; attempt++) {
+      try {
+        return await makeRequest(attempt);
+      } catch (error) {
+        if (attempt > REDFOX_MAX_RETRIES) throw error;
+        console.log(`[RedFox] ${endpoint} 请求失败，${Math.min(attempt * 2, 5)}s 后重试：${error.message}`);
+        await new Promise(r => setTimeout(r, Math.min(attempt * 2, 5) * 1000));
+      }
+    }
+  };
+
+  return executeWithRetry();
 }
 
 async function redfoxData(endpoint, body = {}) {
@@ -5783,19 +5801,26 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
   if (url.pathname === '/api/_/hot/list/sync' && req.method === 'POST') {
-    const platform = url.searchParams.get('platform') || 'all';
-    if (platform === 'all') {
-      await syncRealtimeHotspots('灵感熔炉-手动刷新');
-      json(res, 200, { ok: true, ...hotListPayload('all') });
+    try {
+      const platform = url.searchParams.get('platform') || 'all';
+      if (platform === 'all') {
+        await syncRealtimeHotspots('灵感熔炉-手动刷新');
+        json(res, 200, { ok: true, ...hotListPayload('all') });
+        return true;
+      }
+      if (!HOT_SOURCE_CONFIG[platform]) {
+        json(res, 400, { ok: false, error: '不支持的平台' });
+        return true;
+      }
+      await syncDailyPlatform(platform, dateDaysAgo(1), '灵感熔炉-手动昨日榜');
+      json(res, 200, { ok: true, ...hotListPayload(platform) });
+      return true;
+    } catch (error) {
+      const platform = url.searchParams.get('platform') || 'all';
+      console.error(`[HotList] 同步失败 (platform=${platform}):`, error.message);
+      json(res, 200, { ok: false, error: error.message });
       return true;
     }
-    if (!HOT_SOURCE_CONFIG[platform]) {
-      json(res, 400, { ok: false, error: '不支持的平台' });
-      return true;
-    }
-    await syncDailyPlatform(platform, dateDaysAgo(1), '灵感熔炉-手动昨日榜');
-    json(res, 200, { ok: true, ...hotListPayload(platform) });
-    return true;
   }
   // 返回热榜可用 platform 列表（只返回已启用 cron 的，供前端动态渲染 tab）
   if (url.pathname === '/api/_/hot/platforms' && req.method === 'GET') {
