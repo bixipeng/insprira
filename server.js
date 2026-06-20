@@ -3678,12 +3678,18 @@ async function fetchKeywordHotArticles(keywords, options = {}) {
 }
 
 async function callLlm(messages, options = {}) {
-  // 从 agent 配置获取 Openclaw 网关参数
+  // 从 agent 配置获取 Openclaw 网关参数；未配置时回退到传统 LLM_BASE_URL
   const agentCfg = options.agentConfig || null;
-  const token = agentCfg?.token || process.env.OPENCLAW_TOKEN;
-  const url = (agentCfg?.url || process.env.OPENCLAW_URL || 'http://127.0.0.1:18789').replace(/\/$/, '');
-  const model = agentCfg?.agent_id || 'openclaw/default';
-  if (!token) throw new Error('未配置 Agent Token');
+  let token = agentCfg?.token || process.env.OPENCLAW_TOKEN;
+  let url = (agentCfg?.url || process.env.OPENCLAW_URL || '').replace(/\/$/, '');
+  let model = agentCfg?.agent_id || 'openclaw/default';
+  // 回退：没有 Openclaw 网关配置时，使用传统 LLM_BASE_URL / LLM_API_KEY
+  if (!token && process.env.LLM_API_KEY) {
+    token = process.env.LLM_API_KEY;
+    url = (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    model = process.env.LLM_MODEL || 'gpt-3.5-turbo';
+  }
+  if (!token) throw new Error('未配置 Agent Token 或 LLM_API_KEY');
   const response = await fetch(`${url}/v1/chat/completions`, {
     method: 'POST',
     headers: {
@@ -3727,12 +3733,18 @@ async function callLlmJson(messages) {
 }
 
 async function callLlmStream(messages, options = {}) {
-  // 从 agent 配置获取 Openclaw 网关参数
+  // 从 agent 配置获取 Openclaw 网关参数；未配置时回退到传统 LLM_BASE_URL
   const agentCfg = options.agentConfig || null;
-  const token = agentCfg?.token || process.env.OPENCLAW_TOKEN;
-  const url = (agentCfg?.url || process.env.OPENCLAW_URL || 'http://127.0.0.1:18789').replace(/\/$/, '');
-  const model = agentCfg?.agent_id || 'openclaw/default';
-  if (!token) throw new Error('未配置 Agent Token');
+  let token = agentCfg?.token || process.env.OPENCLAW_TOKEN;
+  let url = (agentCfg?.url || process.env.OPENCLAW_URL || '').replace(/\/$/, '');
+  let model = agentCfg?.agent_id || 'openclaw/default';
+  // 回退：没有 Openclaw 网关配置时，使用传统 LLM_BASE_URL / LLM_API_KEY
+  if (!token && process.env.LLM_API_KEY) {
+    token = process.env.LLM_API_KEY;
+    url = (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
+    model = process.env.LLM_MODEL || 'gpt-3.5-turbo';
+  }
+  if (!token) throw new Error('未配置 Agent Token 或 LLM_API_KEY');
 
   const response = await fetch(`${url}/v1/chat/completions`, {
     method: 'POST',
