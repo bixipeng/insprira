@@ -899,5 +899,13 @@
 <div id="modal-host"></div>
 
 <script type="module" src="js/app.js"></script>
+<script>
+  window.__insprira_debug = { loaded: true, time: Date.now() };
+  console.log('[insprira] page ready, debug:', window.__insprira_debug);
+  setTimeout(() => {
+    const btn = document.querySelector('[data-action="enterApp"]');
+    console.log('[insprira] enterApp button:', btn, 'actions registered:', !!document.querySelector('body').__actionsReady);
+  }, 500);
+</script>
 </body>
 </html>

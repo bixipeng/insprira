@@ -227,6 +227,7 @@ document.addEventListener('error', e => {
 }, true);
 
 // ============= 注册 data-action ============
+console.log('[insprira] app.js loaded, registering actions...');
 registerAction('enterApp', () => enterApp());
 registerAction('doGlobalSearch', () => doGlobalSearch());
 registerAction('refreshCurrent', () => refreshCurrent());
