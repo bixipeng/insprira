@@ -33,3 +33,10 @@ services:
     volumes:
       # 持久化 SQLite 数据库、日志和本地数据
       - ./data:/data
+    networks:
+      - default
+      - 1panel-network
+
+networks:
+  1panel-network:
+    external: true
