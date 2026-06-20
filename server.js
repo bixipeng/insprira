@@ -2259,10 +2259,7 @@ function saveAgentMessage(threadId, role, content) {
 }
 
 function deleteAgentThread(threadId) {
-  const before = db.prepare('SELECT COUNT(*) as c FROM agent_threads').get().c;
-  const result = db.prepare(`DELETE FROM agent_threads WHERE id = ?`).run(threadId);
-  const after = db.prepare('SELECT COUNT(*) as c FROM agent_threads').get().c;
-  console.log('deleteAgentThread', `threadId=${threadId} before=${before} changes=${result.changes} after=${after}`);
+  db.prepare(`DELETE FROM agent_threads WHERE id = ?`).run(threadId);
 }
 
 function updateAgentThreadName(threadId, name) {
@@ -6016,19 +6013,19 @@ async function handleLocalApi(req, res, url) {
     return true;
   }
   if (url.pathname.startsWith('/api/_/agent/threads/') && url.pathname.endsWith('/messages') && req.method === 'GET') {
-    const threadId = url.pathname.split('/')[4];
+    const threadId = url.pathname.split('/')[5];
     const messages = getAgentMessages(threadId);
     json(res, 200, { ok: true, data: messages });
     return true;
   }
   if (url.pathname.startsWith('/api/_/agent/threads/') && req.method === 'DELETE') {
-    const threadId = url.pathname.split('/')[4];
+    const threadId = url.pathname.split('/')[5];
     deleteAgentThread(threadId);
     json(res, 200, { ok: true });
     return true;
   }
   if (url.pathname.startsWith('/api/_/agent/threads/') && req.method === 'PATCH') {
-    const threadId = url.pathname.split('/')[4];
+    const threadId = url.pathname.split('/')[5];
     const { data } = await readBody(req);
     if (data?.name) updateAgentThreadName(threadId, data.name);
     json(res, 200, { ok: true });
