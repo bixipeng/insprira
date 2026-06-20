@@ -7,13 +7,14 @@
 - **热榜与趋势**：全网热点、抖音 / 小红书 / 公众号热榜、AI 公众号 / AI B站 / AI 小红书 / AI 抖音 / AI 快手 / AI 视频号 / 短剧抖音 / 短剧公众号昨日榜；7/14 天增长、稳定、冷却趋势
 - **Skill 中心**：从 [redfox-community](https://github.com/redfox-community/skills) 拉取并热更新；支持 LLM 自动分类（热点 / 创作 / 分析 / 检索 / 生成工具）；热点 Skill 可一键绑定到热榜 Tab
 - **热榜动态 Tab**：默认只显示抖音 / 小红书 / 公众号 3 个基础 Tab，其余平台通过 Skill 绑定后动态创建，解绑即移除
-- **选题生成**：基于本地热榜证据 + 公众号爆款搜索，调用 OpenAI 兼容 LLM 生成选题
+- **选题生成**：基于本地热榜证据 + 公众号爆款搜索，通过 Agent 网关（Openclaw / OpenAI 兼容 API）调用 LLM 生成选题
 - **账号追踪**：分组订阅、作品同步、公众号 / 抖音 / 小红书诊断、趋势图表（粉丝 / 红狐指数 / 评分 / 作品数）
 - **知识库**：Obsidian / Notion 双源接入 + WeRss（we-mp-rss）公众号文章同步
 - **内容重构**：多平台改写、RedFox `gpt-image-2` 封面生成、违禁词检测
+- **Agent 网关**：统一 Agent 管理界面，支持配置多个 Agent（Openclaw / OpenAI 兼容 API），可分别设置 URL、Token、Agent ID、System Prompt，前端按场景灵活切换
 - **本地 Agent**：Codex / Claude Code / Kimi / OpenClaw / Hermes 子进程集成
 - **CRON 调度**：内置每日热榜快照、缓存清理、WeRss 同步、账号追踪刷新等任务；支持自定义、拖拽排序
-- **Docker & 多架构镜像**：提供 Dockerfile 和 Docker Compose，GitHub Actions 自动构建 `linux/amd64` 与 `linux/arm64` 镜像并推送到 GHCR
+- **Docker & 多架构镜像**：提供 Dockerfile 和 Docker Compose，支持 `linux/amd64` 与 `linux/arm64` 架构
 
 ## 本地启动
 
@@ -64,7 +65,7 @@ docker run -d \
   -e APP_PASSWORD=你的登录密码 \
   -v $(pwd)/data:/data \
   --restart unless-stopped \
-  ghcr.io/coracoo/insprira:latest
+  insprira
 ```
 
 > 服务默认监听 `0.0.0.0`，本地和容器内均可直接访问。
@@ -74,8 +75,27 @@ docker run -d \
 完整字段见 [`.env.example`](.env.example)。必填项：
 
 - `REDFOX_API_KEY` — RedFox 平台 API Key
-- `LLM_API_KEY` — OpenAI 兼容 LLM 服务的 Key（用于选题生成、热点分析）
 - `KB_ENCRYPTION_KEY` — 加密密钥，用 `openssl rand -hex 32` 生成，配置后请勿修改
+
+### Agent 网关
+
+选题生成、热点分析等 AI 功能通过 Agent 网关统一管理。支持两种配置方式：
+
+**方式一：环境变量（全局默认）**
+```env
+OPENCLAW_URL=http://127.0.0.1:18789
+OPENCLAW_TOKEN=your_token
+```
+
+**方式二：数据库配置（推荐，支持多 Agent）**
+
+在 Web UI 的「Agent 管理」页面添加 Agent 配置，支持为每个 Agent 独立设置：
+- `url` — Agent 网关地址
+- `token` — 认证 Token
+- `agent_id` — Agent 标识
+- `system_prompt` — 自定义系统提示词
+
+数据库配置的 Agent 优先级高于环境变量，可在前端按场景灵活切换。
 
 ## 验证
 
