@@ -28,6 +28,216 @@ export async function loadSkills(force = false) {
   return skillCache;
 }
 
+// ============ Skills 页面渲染 ============
+
+export async function renderSkills() {
+  try {
+    const skills = await loadSkills();
+    const localCountEl = document.getElementById('skill-local-count');
+    if (localCountEl) localCountEl.textContent = `${skills.length} 个已下载`;
+    const categoryEl = document.getElementById('skillCategory');
+    if (categoryEl) {
+      categoryEl.innerHTML = [
+        '<option value="all">全部分类</option>',
+        '<option value="热点">热点</option>',
+        '<option value="创作">创作</option>',
+        '<option value="分析">分析</option>',
+        '<option value="检索">检索</option>',
+        '<option value="生成工具">生成工具</option>',
+      ].join('');
+    }
+    filterSkills();
+    checkSkillUpdates(false);
+  } catch (e) {
+    const grid = document.getElementById('skill-grid');
+    if (grid) grid.innerHTML = `<div class="text-red-400 text-sm">${esc(e.message)}</div>`;
+  }
+}
+
+export function filterSkills() {
+  const grid = document.getElementById('skill-grid');
+  if (!grid) return;
+  const keyword = document.getElementById('skillSearch')?.value.trim().toLowerCase() || '';
+  const category = document.getElementById('skillCategory')?.value || 'all';
+  const filtered = skillCache.filter(skill => {
+    const cat = skill.llmCategory || skill.category || '其他';
+    const matchesCategory = category === 'all' || cat === category || skill.category === category;
+    return matchesCategory && (!keyword || `${skill.title} ${skill.name} ${skill.description}`.toLowerCase().includes(keyword));
+  });
+  grid.innerHTML = filtered.map(skill => {
+    const cat = skill.llmCategory || skill.category || '其他';
+    const catColor = { '热点': 'pill-hot', '创作': 'pill-brand', '分析': 'pill-sky', '检索': 'pill-green', '生成工具': 'pill-amber' }[cat] || 'pill-gray';
+    const bindable = skill.sourceBinding;
+    const bindBtn = bindable
+      ? `<button class="btn ${skill.cronEnabled ? 'btn-ghost' : 'btn-primary'} py-1 text-[11px] flex-shrink-0" data-action="bindSkillToSource" data-slug="${esc(skill.slug)}" data-stop-propagation title="${skill.cronEnabled ? '已在热榜中' : '启用对应的定时任务'}">
+          <i data-lucide="${skill.cronEnabled ? 'check' : 'plus'}" class="w-3 h-3"></i>${skill.cronEnabled ? '已绑定' : '绑定热榜'}
+        </button>`
+      : '';
+    return `
+    <div class="glass rounded-xl p-4 card flex flex-col relative" data-action="openSkillDetail" data-slug="${skill.slug}">
+      ${skill.isNew ? '<span class="absolute -top-2 -right-2 pill pill-green shadow-lg">New</span>' : ''}
+      <div class="flex items-start justify-between gap-3">
+        <div class="font-semibold text-sm">${esc(skill.title)}</div>
+        <span class="pill ${catColor} !text-[10px]">${esc(cat)}</span>
+      </div>
+      <p class="text-xs text-gray-500 mt-2 line-clamp-2 flex-1">${esc(skill.description || '暂无描述')}</p>
+      <div class="flex items-center justify-between mt-4 gap-2">
+        <code class="text-[10px] text-gray-600 truncate flex-1">${esc(skill.slug)}</code>
+        ${bindBtn}
+        <button class="btn btn-ghost py-1 text-[11px] flex-shrink-0" data-action="openAgentWithSkill" data-slug="${skill.slug}"><i data-lucide="bot" class="w-3 h-3"></i>Agent</button>
+      </div>
+    </div>`;
+  }).join('') || '<div class="text-sm text-gray-500">没有匹配的 Skill</div>';
+  initIcons(document.getElementById('content-area'));
+}
+
+export async function bindSkillToSource(el, d) {
+  if (!d?.slug) return;
+  try {
+    const result = await localApi(`skills/${encodeURIComponent(d.slug)}/bind-source`, { method: 'POST' });
+    const action = result.enabled ? '绑定' : '解绑';
+    toast(`${d.slug} 已${action}热榜（${result.cronId}）`, 'success');
+    clearHotPlatforms();
+    await loadSkills(true);
+    filterSkills();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function classifySkills() {
+  if (!confirm('将调用 LLM 给所有 skill 自动分类（耗时约 30-90 秒），确认开始？')) return;
+  toast('正在用 LLM 分类所有 skill…', 'info');
+  try {
+    const result = await localApi('skills/classify', { method: 'POST' });
+    toast(`分类完成：${result.done}/${result.total} 成功${result.failed ? `，失败 ${result.failed}` : ''}`, 'success');
+    await loadSkills(true);
+    filterSkills();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function renderSkillUpdateStatus() {
+  const host = document.getElementById('skill-update-status');
+  const button = document.getElementById('skill-update-button');
+  if (!host || !button) return;
+  if (!skillUpdateStatus) {
+    host.textContent = '尚未检查更新';
+    button.classList.add('hidden');
+    return;
+  }
+  if (skillUpdateStatus.available) {
+    host.textContent = `发现更新：新增 ${skillUpdateStatus.added.length}、修改 ${skillUpdateStatus.changed.length}、删除 ${skillUpdateStatus.removed.length}`;
+    host.className = 'text-[11px] text-amber-300';
+    button.classList.remove('hidden');
+  } else {
+    host.textContent = '已是最新版本';
+    host.className = 'text-[11px] text-emerald-300';
+    button.classList.add('hidden');
+  }
+  initIcons(document.getElementById('content-area'));
+}
+
+export async function checkSkillUpdates(showToast = true) {
+  const host = document.getElementById('skill-update-status');
+  if (host) {
+    host.textContent = '正在检查 GitHub 更新…';
+    host.className = 'text-[11px] text-gray-500';
+  }
+  try {
+    skillUpdateStatus = await localApi('skills/status');
+    renderSkillUpdateStatus();
+    if (showToast) toast(skillUpdateStatus.available ? '发现 Skill 更新' : 'Skill 已是最新版本', 'success');
+    return skillUpdateStatus;
+  } catch (e) {
+    if (host) {
+      host.textContent = '更新检查失败';
+      host.className = 'text-[11px] text-red-400';
+    }
+    if (showToast) toast(e.message, 'error');
+    return null;
+  }
+}
+
+export async function updateCommunitySkillsUi() {
+  const button = document.getElementById('skill-update-button');
+  const statusEl = document.getElementById('skill-update-status');
+  const grid = document.getElementById('skill-grid');
+
+  const setStatus = (text, cls = 'text-[11px] text-gray-500') => {
+    if (statusEl) { statusEl.textContent = text; statusEl.className = cls; }
+  };
+  const setButton = (text, disabled) => {
+    if (!button) return;
+    button.disabled = disabled;
+    button.innerHTML = text;
+    initIcons(button);
+  };
+
+  setButton('<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>检查更新…', true);
+  setStatus('正在检查更新…');
+  try {
+    const status = await localApi('skills/status');
+    if (!status.available) {
+      setStatus('已是最新版本', 'text-[11px] text-emerald-300');
+      setButton('<i data-lucide="download" class="w-3.5 h-3.5"></i>一键更新', false);
+      button?.classList.add('hidden');
+      toast('Skill 已是最新版本', 'success');
+      return;
+    }
+
+    setButton('<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>下载中…', true);
+    setStatus(`正在下载更新 (新增 ${status.added.length}、修改 ${status.changed.length})…`);
+
+    const result = await localApi('skills/update', { method: 'POST', body: {} });
+    skillUpdateStatus = { ...result, available: false };
+
+    setButton('<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>刷新列表…', true);
+    setStatus('正在刷新 Skill 列表…');
+    if (grid) grid.innerHTML = '<div class="col-span-full text-sm text-gray-500 py-8 text-center"><i data-lucide="loader-circle" class="w-4 h-4 animate-spin inline-block mr-2"></i>加载中…</div>';
+    initIcons(grid);
+
+    await loadSkills(true);
+    const localCountEl = document.getElementById('skill-local-count');
+    if (localCountEl) localCountEl.textContent = `${skillCache.length} 个已下载`;
+    filterSkills();
+    renderSkillUpdateStatus();
+
+    const addedCount = result.addedSlugs?.length || 0;
+    toast(addedCount ? `Skill 更新完成，新增 ${addedCount} 个` : 'Skill 已是最新版本', 'success');
+  } catch (e) {
+    setStatus('更新失败', 'text-[11px] text-red-400');
+    setButton('<i data-lucide="download" class="w-3.5 h-3.5"></i>一键更新', false);
+    toast(e.message, 'error');
+  }
+}
+
+export async function openSkillDetail(slug) {
+  try {
+    const skill = await localApi(`skills/${encodeURIComponent(slug)}`);
+    const modal = document.createElement('div');
+    modal.className = 'modal-mask';
+    modal.innerHTML = `<div class="modal" style="max-width:760px;max-height:85vh;overflow-y:auto" data-action="stopPropagation">
+      <div class="flex items-start justify-between mb-4">
+        <div><h3 class="font-semibold">${esc(skill.title)}</h3><div class="text-[11px] text-gray-500 mt-1">${esc(skill.path)}</div></div>
+        <button class="btn btn-ghost py-1 px-2" data-action="closeModal"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <p class="text-sm text-gray-400 mb-4">${esc(skill.description)}</p>
+      <pre class="text-xs text-gray-400 whitespace-pre-wrap bg-black/20 rounded-lg p-4 overflow-x-auto">${esc(skill.content.slice(0, 30000))}</pre>
+      <button class="btn btn-primary mt-4" data-action="closeModalAndOpenAgentWithSkill" data-slug="${skill.slug}"><i data-lucide="bot" class="w-4 h-4"></i>使用此 Skill 对话</button>
+    </div>`;
+    modal.addEventListener('click', event => {
+      if (event.target === modal) modal.remove();
+    });
+    document.getElementById('modal-host').appendChild(modal);
+    initIcons(modal);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+export function openAgentWithSkill(slug) {
+  LS.set('agentSkillDraft', `/${slug} `);
+  gotoPage('agent');
+}
+
 // ============ Agent 线程管理（后端持久化） ============
 
 async function loadThreadsFromServer() {
