@@ -152,7 +152,7 @@ export function renderTracker() {
           <button class="btn btn-ghost flex-1 justify-center text-[11px] py-1" data-action="diagnoseTracker" data-id="${t.id}"><i data-lucide="activity" class="w-3 h-3"></i>评分详情</button>
           <button class="btn btn-ghost text-[11px] py-1" data-action="viewTrackerTrend" data-id="${t.id}" title="账号趋势"><i data-lucide="line-chart" class="w-3 h-3"></i></button>
           <button class="btn btn-ghost text-[11px] py-1" data-action="editTracker" data-id="${t.id}" title="编辑账号"><i data-lucide="pencil" class="w-3 h-3"></i></button>
-          <button class="btn btn-ghost text-[11px] py-1" data-action="removeTracker" data-id="${t.id}" title="移除"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+          <button type="button" class="btn btn-ghost text-[11px] py-1" data-action="removeTracker" data-id="${t.id}" title="移除"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
         </div>`}
       </div>`;
     }).join('');
@@ -299,6 +299,7 @@ export async function submitAddAccount() {
       const data = await api('gzhSearchUser', { keyword: name });
       if (data && data.list && data.list.length) {
         const found = data.list[0];
+        accountId = found.account; // 使用 API 返回的公众号 ID 覆盖输入值
         extra = {
           gzhAccount: found.account,
           gzhAccountType: found.accountType,
