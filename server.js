@@ -3690,7 +3690,9 @@ async function callLlm(messages, options = {}) {
     model = process.env.LLM_MODEL || 'gpt-3.5-turbo';
   }
   if (!token) throw new Error('未配置 Agent Token 或 LLM_API_KEY');
-  const response = await fetch(`${url}/v1/chat/completions`, {
+  // Openclaw 网关需要 /v1/chat/completions，传统 LLM_BASE_URL 已含 /v1，只需 /chat/completions
+  const apiPath = url.includes('/v1') ? '/chat/completions' : '/v1/chat/completions';
+  const response = await fetch(`${url}${apiPath}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -3746,7 +3748,8 @@ async function callLlmStream(messages, options = {}) {
   }
   if (!token) throw new Error('未配置 Agent Token 或 LLM_API_KEY');
 
-  const response = await fetch(`${url}/v1/chat/completions`, {
+  const apiPath = url.includes('/v1') ? '/chat/completions' : '/v1/chat/completions';
+  const response = await fetch(`${url}${apiPath}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
