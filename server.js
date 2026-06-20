@@ -569,7 +569,63 @@ db.exec(`
     created_at INTEGER NOT NULL,
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS agent_threads (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '新对话',
+    agent_id TEXT NOT NULL DEFAULT 'llm',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS agent_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('user','assistant','system')),
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    FOREIGN KEY(thread_id) REFERENCES agent_threads(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_agent_msg_thread ON agent_messages(thread_id, created_at);
+
+  CREATE TABLE IF NOT EXISTS agent_configs (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL DEFAULT 'http://127.0.0.1:18789',
+    token TEXT NOT NULL DEFAULT '',
+    agent_id TEXT NOT NULL DEFAULT 'openclaw/default',
+    system_prompt TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
 `);
+
+// 迁移旧表结构（v0.1.3 -> v0.1.4：LLM 配置 → Agent 网关配置）
+const oldCols = db.prepare("PRAGMA table_info(agent_configs)").all().map(c => c.name);
+if (oldCols.includes('base_url') && !oldCols.includes('url')) {
+  db.exec(`
+    ALTER TABLE agent_configs RENAME TO agent_configs_old;
+    CREATE TABLE agent_configs (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      url TEXT NOT NULL DEFAULT 'http://127.0.0.1:18789',
+      token TEXT NOT NULL DEFAULT '',
+      agent_id TEXT NOT NULL DEFAULT 'openclaw/default',
+      system_prompt TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    INSERT INTO agent_configs (id, name, url, token, agent_id, system_prompt, enabled, created_at, updated_at)
+      SELECT id, name,
+        CASE WHEN base_url = 'https://api.openai.com/v1' THEN 'http://127.0.0.1:18789' ELSE base_url END,
+        api_key, model, system_prompt, enabled, created_at, updated_at
+      FROM agent_configs_old;
+    DROP TABLE agent_configs_old;
+  `);
+  console.log('[migration] agent_configs: LLM 配置 → Agent 网关配置');
+}
 
 function ensureColumn(table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
@@ -2119,132 +2175,115 @@ function parseAgentJsonLines(output, role = 'assistant') {
 }
 
 async function listLocalAgents() {
-  const agents = [];
-  for (const [id, name, family, bin] of [
-    ['codex', 'Codex', 'Codex CLI', CODEX_BIN],
-    ['claude', 'Claude Code', 'Claude Code', CLAUDE_BIN],
-    ['kimi', 'Kimi', 'Kimi Code CLI', KIMI_BIN],
-  ]) {
-    const located = locateExecutable(bin);
-    agents.push({
-      id,
-      name,
-      family,
-      available: Boolean(located.path),
-      reason: located.reason,
-      path: located.path || '',
-    });
+  const configs = db.prepare('SELECT * FROM agent_configs ORDER BY created_at ASC').all();
+  if (!configs.length) {
+    // 回退：使用环境变量创建默认 agent
+    const hasToken = Boolean(process.env.OPENCLAW_TOKEN);
+    const url = process.env.OPENCLAW_URL || 'http://127.0.0.1:18789';
+    return [{
+      id: 'openclaw',
+      name: 'Openclaw · 默认',
+      family: 'Agent 网关',
+      agent_id: 'openclaw/default',
+      available: hasToken,
+      reason: hasToken ? '' : '未配置 OPENCLAW_TOKEN',
+      _fallback: true,
+    }];
   }
-  const openclawPath = resolveExecutable(OPENCLAW_BIN);
-  if (openclawPath) {
-    try {
-      const { stdout } = await runProcess(openclawPath, ['agents', 'list', '--json'], {
-        cwd: __dirname,
-        timeout: 15000,
-        maxBuffer: 2 * 1024 * 1024,
-      });
-      const profiles = parseJson(stdout);
-      if (Array.isArray(profiles) && profiles.length) {
-        for (const profile of profiles) {
-          agents.push({
-            id: `openclaw:${profile.id}`,
-            name: `OpenClaw · ${profile.identityName || profile.name || profile.id}`,
-            family: 'OpenClaw',
-            model: profile.model || '',
-            available: true,
-          });
-        }
-      } else {
-        agents.push({ id: 'openclaw', name: 'OpenClaw', family: 'OpenClaw', available: true });
-      }
-    } catch (error) {
-      agents.push({
-        id: 'openclaw',
-        name: 'OpenClaw',
-        family: 'OpenClaw',
-        available: false,
-        reason: error.message,
-      });
-    }
-  } else {
-    agents.push({ id: 'openclaw', name: 'OpenClaw', family: 'OpenClaw', available: false, reason: '未检测到 CLI' });
-  }
-  const hermesLocated = locateExecutable(HERMES_BIN);
-  agents.push({
-    id: 'hermes',
-    name: 'Hermes',
-    family: 'Hermes Agent',
-    available: Boolean(hermesLocated.path),
-    reason: hermesLocated.path ? '' : hermesLocated.reason || '未检测到 Hermes CLI',
-  });
-  return agents;
+  return configs.map(c => ({
+    id: c.id,
+    name: c.name,
+    family: 'Agent 网关',
+    agent_id: c.agent_id,
+    available: Boolean(c.enabled && c.token),
+    reason: !c.enabled ? '已禁用' : (!c.token ? '未配置 Token' : ''),
+  }));
 }
 
-async function executeAgent(agentId, prompt, mode, outputFile) {
-  if (agentId === 'codex') {
-    const executable = resolveExecutable(CODEX_BIN);
-    if (!executable) throw new Error('未检测到 Codex CLI');
-    await runProcess(executable, [
-      'exec',
-      '--ephemeral',
-      '--skip-git-repo-check',
-      '--sandbox',
-      mode === 'workspace' ? 'workspace-write' : 'read-only',
-      '-C',
-      __dirname,
-      '-o',
-      outputFile,
-      prompt,
-    ], { cwd: __dirname, timeout: 180000, maxBuffer: 5 * 1024 * 1024 });
-    return fs.existsSync(outputFile) ? fs.readFileSync(outputFile, 'utf8').trim() : '';
+// ============ Agent 配置 CRUD ============
+
+function getAgentConfig(agentId) {
+  return db.prepare('SELECT * FROM agent_configs WHERE id = ?').get(agentId) || null;
+}
+
+function getAgentConfigs() {
+  return db.prepare('SELECT * FROM agent_configs ORDER BY created_at ASC').all();
+}
+
+function createAgentConfig({ id, name, url, token, agentId, systemPrompt, enabled }) {
+  const now = Date.now();
+  db.prepare(`INSERT INTO agent_configs (id, name, url, token, agent_id, system_prompt, enabled, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    id, name, url || 'http://127.0.0.1:18789', token || '', agentId || 'openclaw/default',
+    systemPrompt || '', enabled ?? 1, now, now
+  );
+  return getAgentConfig(id);
+}
+
+function updateAgentConfig(id, fields) {
+  const existing = getAgentConfig(id);
+  if (!existing) return null;
+  const now = Date.now();
+  const name = fields.name ?? existing.name;
+  const url = fields.url ?? existing.url;
+  const token = fields.token !== undefined ? fields.token : existing.token;
+  const agentId = fields.agentId ?? existing.agent_id;
+  const systemPrompt = fields.systemPrompt !== undefined ? fields.systemPrompt : existing.system_prompt;
+  const enabled = fields.enabled ?? existing.enabled;
+  db.prepare(`UPDATE agent_configs SET name=?, url=?, token=?, agent_id=?, system_prompt=?, enabled=?, updated_at=?
+    WHERE id=?`).run(name, url, token, agentId, systemPrompt, enabled, now, id);
+  return getAgentConfig(id);
+}
+
+function deleteAgentConfig(id) {
+  // 删除该 agent 的所有线程和消息
+  const threads = db.prepare('SELECT id FROM agent_threads WHERE agent_id = ?').all(id);
+  for (const t of threads) {
+    db.prepare('DELETE FROM agent_messages WHERE thread_id = ?').run(t.id);
+    db.prepare('DELETE FROM agent_threads WHERE id = ?').run(t.id);
   }
-  if (agentId === 'claude') {
-    const executable = resolveExecutable(CLAUDE_BIN);
-    if (!executable) throw new Error('未检测到 Claude Code CLI');
-    const { stdout } = await runProcess(executable, [
-      '-p',
-      '--no-session-persistence',
-      '--permission-mode',
-      mode === 'workspace' ? 'acceptEdits' : 'plan',
-      prompt,
-    ], { cwd: __dirname, timeout: 180000, maxBuffer: 5 * 1024 * 1024 });
-    return stdout.trim();
-  }
-  if (agentId === 'kimi') {
-    const executable = resolveExecutable(KIMI_BIN);
-    if (!executable) throw new Error('未检测到 Kimi CLI');
-    const args = ['--prompt', prompt, '--output-format', 'stream-json'];
-    if (mode === 'workspace') args.push('--yolo');
-    const { stdout } = await runProcess(executable, args, {
-      cwd: __dirname,
-      timeout: 180000,
-      maxBuffer: 5 * 1024 * 1024,
-    });
-    return parseAgentJsonLines(stdout)
-      || stdout.replace(/\nTo resume this session:[\s\S]*$/i, '').trim();
-  }
-  if (agentId === 'openclaw' || agentId.startsWith('openclaw:')) {
-    const executable = resolveExecutable(OPENCLAW_BIN);
-    if (!executable) throw new Error('未检测到 OpenClaw CLI');
-    const profile = agentId.includes(':') ? agentId.slice(agentId.indexOf(':') + 1) : '';
-    const args = ['agent'];
-    if (profile) args.push('--agent', profile);
-    args.push('--message', prompt, '--json', '--timeout', '180');
-    const { stdout } = await runProcess(executable, args, {
-      cwd: __dirname,
-      timeout: 200000,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    const payload = parseJson(stdout);
-    return findNestedString(payload, 'finalAssistantVisibleText')
-      || findNestedString(payload, 'finalAssistantRawText')
-      || findNestedString(payload, 'text');
-  }
-  if (agentId === 'hermes') {
-    if (!resolveExecutable(HERMES_BIN)) throw new Error('当前机器未安装 Hermes CLI');
-    throw new Error('已检测到 Hermes，但尚未识别其非交互调用协议，请配置兼容适配器');
-  }
-  throw new Error('不支持的本地 Agent');
+  db.prepare('DELETE FROM agent_configs WHERE id = ?').run(id);
+  return true;
+}
+
+// Agent 线程管理
+function createAgentThread(agentId) {
+  const id = `thread_${Date.now()}`;
+  db.prepare(`INSERT INTO agent_threads (id, name, agent_id, created_at, updated_at) VALUES (?, '新对话', ?, ?, ?)`).run(id, agentId, Date.now(), Date.now());
+  return id;
+}
+
+function getAgentThreads() {
+  return db.prepare(`SELECT * FROM agent_threads ORDER BY updated_at DESC`).all();
+}
+
+function getAgentMessages(threadId) {
+  return db.prepare(`SELECT * FROM agent_messages WHERE thread_id = ? ORDER BY created_at ASC`).all().map(m => ({
+    id: m.id, threadId: m.thread_id, role: m.role, content: m.content, timestamp: m.created_at,
+  }));
+}
+
+function saveAgentMessage(threadId, role, content) {
+  const now = Date.now();
+  db.prepare(`INSERT INTO agent_messages (thread_id, role, content, created_at) VALUES (?, ?, ?, ?)`).run(threadId, role, content, now);
+  db.prepare(`UPDATE agent_threads SET updated_at = ?, name = CASE WHEN name = '新对话' AND role = 'user' THEN substr(?, 1, 20) ELSE name END WHERE id = ?`).run(now, content.replace(/\n/g, ' '), threadId);
+}
+
+function deleteAgentThread(threadId) {
+  db.prepare(`DELETE FROM agent_threads WHERE id = ?`).run(threadId);
+}
+
+function updateAgentThreadName(threadId, name) {
+  db.prepare(`UPDATE agent_threads SET name = ?, updated_at = ? WHERE id = ?`).run(name, Date.now(), threadId);
+}
+
+function clearAgentThreadMessages(threadId) {
+  db.prepare(`DELETE FROM agent_messages WHERE thread_id = ?`).run(threadId);
+  db.prepare(`UPDATE agent_threads SET updated_at = ? WHERE id = ?`).run(Date.now(), threadId);
+}
+
+function deleteAgentMessage(messageId, threadId) {
+  db.prepare(`DELETE FROM agent_messages WHERE id = ? AND thread_id = ?`).run(messageId, threadId);
 }
 
 async function runWechatDiagnosis(accountName) {
@@ -2397,54 +2436,154 @@ async function runPlatformDiagnosis(tracker, sourceData = null) {
   throw new Error('当前平台不支持账号诊断');
 }
 
-async function runLocalAgent(body) {
-  if (agentBusy) throw new Error('Agent 正在处理上一条消息，请稍后重试');
+function buildAgentSystemPrompt(skill, threadId, agentConfig = null) {
+  const skillInstruction = skill
+    ? `用户选择了 Skill：${skill.title}。\n描述：${skill.description || ''}\n工作流：${skill.content || '请按 SKILL.md 中的工作流执行。'}`
+    : '';
+
+  // 使用 agent 自定义 system prompt，如果未设置则用默认
+  const defaultPrompt = [
+    '你是"灵感熔炉"的自媒体数据与创作助手 Agent。',
+    '你的能力包括：数据分析、趋势解读、内容创作建议、平台策略分析。',
+    '使用中文回答，结论要具体。不要泄露环境变量、API Key、Cookie 或其他密钥。',
+    '回答格式：使用 Markdown 排版，重要结论用加粗标注。',
+  ].join('\n\n');
+
+  const basePrompt = agentConfig?.system_prompt || defaultPrompt;
+  const parts = [basePrompt];
+
+  if (skillInstruction) {
+    parts.push(`---\n当前激活的 Skill 指令：\n${skillInstruction}`);
+  }
+
+  return parts.join('\n\n');
+}
+
+function buildAgentMessages(threadId, skill, userMessage, agentConfig = null) {
+  const systemPrompt = buildAgentSystemPrompt(skill, threadId, agentConfig);
+  const history = threadId ? getAgentMessages(threadId) : [];
+  const messages = [
+    { role: 'system', content: systemPrompt },
+  ];
+  // 取最近 20 条历史消息作为上下文
+  const recentHistory = history.slice(-20);
+  for (const m of recentHistory) {
+    messages.push({ role: m.role, content: m.content });
+  }
+  messages.push({ role: 'user', content: userMessage });
+  return { messages, history };
+}
+
+async function runAgentStream(req, res, body) {
+  if (agentBusy) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(`data: ${JSON.stringify({ type: 'error', error: 'Agent 正在处理上一条消息，请稍后重试' })}\n\n`);
+    return;
+  }
+
   let message = String(body.message || '').trim();
-  if (!message) throw new Error('请输入对话内容');
-  if (message.length > 10000) throw new Error('单次消息不能超过 10000 字');
+  if (!message) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(`data: ${JSON.stringify({ type: 'error', error: '请输入对话内容' })}\n\n`);
+    return;
+  }
+  if (message.length > 10000) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(`data: ${JSON.stringify({ type: 'error', error: '单次消息不能超过 10000 字' })}\n\n`);
+    return;
+  }
+
   const slashCommand = message.match(/^\/([a-z0-9-]+)(?:\s+([\s\S]*))?$/i);
   const skill = slashCommand ? getSkill(slashCommand[1]) : null;
-  if (slashCommand && !skill) throw new Error(`Skill /${slashCommand[1]} 不存在`);
+  if (slashCommand && !skill) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end(`data: ${JSON.stringify({ type: 'error', error: `Skill /${slashCommand[1]} 不存在` })}\n\n`);
+    return;
+  }
   if (slashCommand) {
     message = String(slashCommand[2] || '').trim();
-    if (!message) throw new Error(`请在 /${skill.slug} 后输入具体任务`);
+    if (!message) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(`data: ${JSON.stringify({ type: 'error', error: `请在 /${skill.slug} 后输入具体任务` })}\n\n`);
+      return;
+    }
   }
-  const agentId = String(body.agent || 'codex');
-  const agents = await listLocalAgents();
-  const selectedAgent = agents.find(agent => agent.id === agentId);
-  if (!selectedAgent) throw new Error('选择的 Agent 不存在');
-  if (!selectedAgent.available) throw new Error(selectedAgent.reason || `${selectedAgent.name} 当前不可用`);
-  const mode = body.mode === 'workspace' ? 'workspace' : 'read';
-  const outputFile = path.join(os.tmpdir(), `insprira-agent-${crypto.randomUUID()}.txt`);
-  const skillInstruction = skill
-    ? `用户选择了本地 Skill：${skill.title}。你必须先读取 ${path.join(SKILLS_ROOT, skill.slug, 'SKILL.md')}，并按其中工作流执行。`
-    : '用户未指定 Skill。请先判断是否需要读取 skills/redfox-community/skills 下的相关 SKILL.md。';
-  const prompt = [
-    '你是“灵感熔炉”的本地开发与自媒体数据 Agent。',
-    `当前项目目录：${__dirname}`,
-    skillInstruction,
-    mode === 'workspace'
-      ? '当前允许修改项目文件。修改后应执行必要验证，并在回答中列出改动。'
-      : '当前为只读模式。不要修改任何文件，只进行查询、分析和回答。',
-    '使用中文回答，结论要具体。不要泄露环境变量、API Key、Cookie 或其他密钥。',
-    `用户请求：${message}`,
-  ].join('\n\n');
+
+  const agentId = String(body.agent || 'openclaw');
+
+  // 读取 agent 配置（数据库优先，回退到环境变量）
+  const agentConfig = getAgentConfig(agentId);
+  const agentName = agentConfig?.name || `Agent · ${agentConfig?.agent_id || agentId}`;
+
+  // 线程管理
+  let threadId = body.threadId || '';
+  if (threadId && !db.prepare('SELECT id FROM agent_threads WHERE id = ?').get(threadId)) {
+    threadId = '';
+  }
+  if (!threadId) {
+    threadId = createAgentThread(agentId);
+  }
+
+  // 保存用户消息
+  saveAgentMessage(threadId, 'user', message);
+
+  // 构造消息（传入 agent 配置以使用自定义 system prompt）
+  const { messages } = buildAgentMessages(threadId, skill, message, agentConfig);
+
+  // 设置 SSE 响应头
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+
+  // 发送初始信息
+  res.write(`data: ${JSON.stringify({ type: 'start', threadId, agent: agentId, agentName: agentName, skill: skill?.slug || null })}\n\n`);
+
   agentBusy = true;
+  const abortController = new AbortController();
+  let fullAnswer = '';
+
+  // 客户端断开时中止
+  req.on('close', () => {
+    abortController.abort();
+  });
+
   try {
-    const answer = await executeAgent(agentId, prompt, mode, outputFile);
-    if (!answer) throw new Error(`${selectedAgent.name} 未返回内容`);
-    return { answer, agent: agentId, agentName: selectedAgent.name, skill: skill?.slug || null, mode };
+    const stream = await callLlmStream(messages, { signal: abortController.signal, agentConfig });
+    const reader = stream.getReader();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += typeof value === 'string' ? value : new TextDecoder().decode(value);
+      const { content, finishReason } = parseSseChunk(buffer);
+      buffer = ''; // 重置 buffer，保留未完成的行（简单处理）
+
+      if (content) {
+        fullAnswer += content;
+        res.write(`data: ${JSON.stringify({ type: 'delta', content })}\n\n`);
+      }
+      if (finishReason) break;
+    }
+
+    // 保存 assistant 消息
+    if (fullAnswer) {
+      saveAgentMessage(threadId, 'assistant', fullAnswer);
+    }
+
+    res.write(`data: ${JSON.stringify({ type: 'done', answer: fullAnswer, threadId })}\n\n`);
   } catch (error) {
-    if (/usage limit|rate limit|credits|quota|额度|限额/i.test(error.message)) {
-      throw new Error(`${selectedAgent.name} 当前额度已用尽，请稍后重试或切换其他 Agent`);
+    if (error.name === 'AbortError') {
+      res.write(`data: ${JSON.stringify({ type: 'done', answer: fullAnswer, threadId, interrupted: true })}\n\n`);
+    } else {
+      res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
     }
-    if (/auth|login|credential|api key/i.test(error.message)) {
-      throw new Error(`${selectedAgent.name} 尚未完成登录或凭证配置`);
-    }
-    throw error;
   } finally {
     agentBusy = false;
-    fs.rmSync(outputFile, { force: true });
+    res.end();
   }
 }
 
@@ -2976,7 +3115,6 @@ async function syncDailyPlatform(platform, dataDate = dateDaysAgo(1), source = '
         error: items.length ? null : `${dataDate} 暂无榜单数据`,
         startedAt,
       });
-      if (!items.length) throw new Error(`${dataDate} 暂无榜单数据，继续使用本地缓存`);
       return batch;
     } catch (error) {
       const alreadySaved = db.prepare(`
@@ -3540,27 +3678,27 @@ async function fetchKeywordHotArticles(keywords, options = {}) {
 }
 
 async function callLlm(messages, options = {}) {
-  const apiKey = process.env.LLM_API_KEY;
-  const baseUrl = (process.env.LLM_BASE_URL || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const model = process.env.LLM_MODEL || 'gpt-4.1-mini';
-  if (!apiKey) throw new Error('未配置 LLM_API_KEY');
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  // 从 agent 配置获取 Openclaw 网关参数
+  const agentCfg = options.agentConfig || null;
+  const token = agentCfg?.token || process.env.OPENCLAW_TOKEN;
+  const url = (agentCfg?.url || process.env.OPENCLAW_URL || 'http://127.0.0.1:18789').replace(/\/$/, '');
+  const model = agentCfg?.agent_id || 'openclaw/default';
+  if (!token) throw new Error('未配置 Agent Token');
+  const response = await fetch(`${url}/v1/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
       model,
       messages,
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens ?? 4096,
       response_format: options.json ? { type: 'json_object' } : undefined,
     }),
     signal: AbortSignal.timeout(60000),
   });
   const payload = await response.json();
-  if (!response.ok) throw new Error(payload?.error?.message || `LLM HTTP ${response.status}`);
+  if (!response.ok) throw new Error(payload?.error?.message || `Agent HTTP ${response.status}`);
   return payload.choices?.[0]?.message?.content || '';
 }
 
@@ -3586,6 +3724,56 @@ async function callLlmJson(messages) {
     ], { json: true, temperature: 0, maxTokens: 4096 });
     return parseLlmJson(repaired);
   }
+}
+
+async function callLlmStream(messages, options = {}) {
+  // 从 agent 配置获取 Openclaw 网关参数
+  const agentCfg = options.agentConfig || null;
+  const token = agentCfg?.token || process.env.OPENCLAW_TOKEN;
+  const url = (agentCfg?.url || process.env.OPENCLAW_URL || 'http://127.0.0.1:18789').replace(/\/$/, '');
+  const model = agentCfg?.agent_id || 'openclaw/default';
+  if (!token) throw new Error('未配置 Agent Token');
+
+  const response = await fetch(`${url}/v1/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      stream: true,
+    }),
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Agent HTTP ${response.status}: ${err.slice(0, 200)}`);
+  }
+
+  return response.body;
+}
+
+function parseSseChunk(chunk) {
+  const text = typeof chunk === 'string' ? chunk : new TextDecoder().decode(chunk);
+  const lines = text.split('\n');
+  let content = '';
+  let finishReason = null;
+  for (const line of lines) {
+    if (line.startsWith('data: ')) {
+      const data = line.slice(6).trim();
+      if (data === '[DONE]') { finishReason = 'stop'; continue; }
+      try {
+        const parsed = JSON.parse(data);
+        const delta = parsed?.choices?.[0]?.delta?.content;
+        if (delta) content += delta;
+        if (parsed?.choices?.[0]?.finish_reason) finishReason = parsed.choices[0].finish_reason;
+      } catch {}
+    }
+  }
+  return { content, finishReason };
 }
 
 const HOTSPOT_LISTS = {
@@ -3624,7 +3812,7 @@ function normalizeRealtimeHotspots(data, snapshotDate = localDate()) {
   const groups = new Map();
   for (const item of normalizeHotspots(data)) {
     if (item.createdAt && !String(item.createdAt).startsWith(snapshotDate)) continue;
-    const canonical = item.title.toLowerCase().replace(/[\s·,，。！？!?：:、"'“”‘’（）()【】[\]-]/g, '');
+    const canonical = item.title.toLowerCase().replace(/[\s·,，。！？!?：:、"'""''（）()【】[\]-]/g, '');
     const key = canonical || `${item.platform}:${item.title}`;
     if (!groups.has(key)) {
       groups.set(key, {
@@ -3701,7 +3889,6 @@ async function syncRealtimeHotspots(source = '灵感熔炉-实时热榜') {
         error: items.length ? null : '当前时段暂无实时热点',
         startedAt,
       });
-      if (!items.length) throw new Error('当前时段暂无实时热点，继续使用本地缓存');
       return batch;
     } catch (error) {
       const alreadySaved = db.prepare(`
@@ -3749,7 +3936,7 @@ async function findRewriteHotspots(body) {
   const analysis = await callLlmJson([
     {
       role: 'system',
-      content: '你是中文内容编辑。提取适合搜索实时热榜的短关键词，必须包含文章里的核心实体或行业词，避免完整长句和“介绍、方法、分享”等空词。中文词控制在2-8字，英文词控制在1-3个单词。例如“NAS本地AI Agent”应拆成“NAS”“AI Agent”“本地AI”。输出严格 JSON：{"topic":"","keywords":[""]}，关键词 3-5 个。',
+      content: '你是中文内容编辑。提取适合搜索实时热榜的短关键词，必须包含文章里的核心实体或行业词，避免完整长句和"介绍、方法、分享"等空词。中文词控制在2-8字，英文词控制在1-3个单词。例如"NAS本地AI Agent"应拆成"NAS""AI Agent""本地AI"。输出严格 JSON：{"topic":"","keywords":[""]}，关键词 3-5 个。',
     },
     { role: 'user', content: text.slice(0, 12000) },
   ]);
@@ -3792,7 +3979,7 @@ async function findRewriteHotspots(body) {
     const ranked = await callLlmJson([
       {
         role: 'system',
-        content: '判断热点能否自然用于文章标题和前言。禁止只因共享“AI”等宽泛词就强行关联。输出严格 JSON：{"matches":[{"index":1,"relevance":0,"angle":""}]}。只保留相关度不低于60的项目，最多12项。',
+        content: '判断热点能否自然用于文章标题和前言。禁止只因共享"AI"等宽泛词就强行关联。输出严格 JSON：{"matches":[{"index":1,"relevance":0,"angle":""}]}。只保留相关度不低于60的项目，最多12项。',
       },
       {
         role: 'user',
@@ -3890,7 +4077,7 @@ async function rewriteForPlatform(body) {
     validated = await callLlmJson([
       {
         role: 'system',
-        content: '你是严格的事实校对编辑。逐句检查草稿，只保留能从“原始素材”或“允许使用的热点标题”直接推出的内容。删除所有新增的原因、功能细节、时间判断、法规推测、产品示例和数据，不得用常识补全。素材信息少时允许成稿很短。保持 JSON 字段不变，只输出 {"title":"","intro":"","content":""}。',
+        content: '你是严格的事实校对编辑。逐句检查草稿，只保留能从"原始素材"或"允许使用的热点标题"直接推出的内容。删除所有新增的原因、功能细节、时间判断、法规推测、产品示例和数据，不得用常识补全。素材信息少时允许成稿很短。保持 JSON 字段不变，只输出 {"title":"","intro":"","content":""}。',
       },
       {
         role: 'user',
@@ -4518,7 +4705,7 @@ async function generateInspirations(body) {
       : '你是中文自媒体选题编辑。本轮没有可用热点证据，只能根据账号赛道、关键词和通用内容方法进行大模型推理。不得声称某话题正在爆发、属于当前热点、未来必然上涨或引用不存在的数据。输出严格 JSON：{"ideas":[{"title":"","summary":"","angle":"","targetPlatform":"","sourceKeywords":[""],"sourceIndexes":[]}]}。sourceIndexes 必须为空数组，不输出 Markdown。';
     const userContent = sourceMode === 'hot-evidence'
       ? `账号赛道：${domain || '未指定'}\n搜索关键词：${keywords.join('、')}\n真实证据：\n${evidenceText}\n\n近期已有选题，禁止重复或近义改写：\n${historyText}\n\n跨平台数和独立作者数越多，信号越强。生成 ${count} 个彼此不重复、可执行的选题，摘要必须说明引用了哪些证据信号。`
-      : `账号赛道：${domain || '未指定'}\n关键词：${keywords.join('、')}\n\n近期已有选题，禁止重复或近义改写：\n${historyText}\n\n生成 ${count} 个彼此不重复、可执行的常青型或方法型选题。每条摘要必须明确写出“无热点证据，本选题为模型推理”，并说明推理角度。不要使用“突然爆发”“最近大火”“接下来几天会怎样”等暗示实时趋势的表达。`;
+      : `账号赛道：${domain || '未指定'}\n关键词：${keywords.join('、')}\n\n近期已有选题，禁止重复或近义改写：\n${historyText}\n\n生成 ${count} 个彼此不重复、可执行的常青型或方法型选题。每条摘要必须明确写出"无热点证据，本选题为模型推理"，并说明推理角度。不要使用"突然爆发""最近大火""接下来几天会怎样"等暗示实时趋势的表达。`;
     llmCalls += 1;
     const content = await callLlm([
       { role: 'system', content: systemContent },
@@ -5761,9 +5948,90 @@ async function handleLocalApi(req, res, url) {
     json(res, 200, { ok: true, data: await listLocalAgents() });
     return true;
   }
+  // Agent 配置 CRUD
+  if (url.pathname === '/api/_/agent/configs' && req.method === 'GET') {
+    const configs = getAgentConfigs();
+    // 脱敏：不返回完整 token
+    const safe = configs.map(c => ({
+      ...c,
+      token: c.token ? c.token.slice(0, 8) + '***' + c.token.slice(-4) : '',
+    }));
+    json(res, 200, { ok: true, data: safe });
+    return true;
+  }
+  if (url.pathname === '/api/_/agent/configs' && req.method === 'POST') {
+    const { data } = await readBody(req);
+    if (!data?.id || !data?.name) {
+      json(res, 400, { ok: false, error: '缺少 id 或 name' });
+      return true;
+    }
+    if (getAgentConfig(data.id)) {
+      json(res, 409, { ok: false, error: 'Agent ID 已存在' });
+      return true;
+    }
+    const cfg = createAgentConfig(data);
+    json(res, 200, { ok: true, data: { ...cfg, token: cfg.token ? cfg.token.slice(0, 8) + '***' + cfg.token.slice(-4) : '' } });
+    return true;
+  }
+  const agentConfigMatch = url.pathname.match(/^\/api\/_\/agent\/configs\/([a-z0-9_-]+)$/);
+  if (agentConfigMatch && req.method === 'GET') {
+    const cfg = getAgentConfig(agentConfigMatch[1]);
+    if (!cfg) { json(res, 404, { ok: false, error: 'Agent 配置不存在' }); return true; }
+    json(res, 200, { ok: true, data: { ...cfg, token: cfg.token ? cfg.token.slice(0, 8) + '***' + cfg.token.slice(-4) : '' } });
+    return true;
+  }
+  if (agentConfigMatch && req.method === 'PUT') {
+    const { data } = await readBody(req);
+    const cfg = updateAgentConfig(agentConfigMatch[1], data || {});
+    if (!cfg) { json(res, 404, { ok: false, error: 'Agent 配置不存在' }); return true; }
+    json(res, 200, { ok: true, data: { ...cfg, token: cfg.token ? cfg.token.slice(0, 8) + '***' + cfg.token.slice(-4) : '' } });
+    return true;
+  }
+  if (agentConfigMatch && req.method === 'DELETE') {
+    deleteAgentConfig(agentConfigMatch[1]);
+    json(res, 200, { ok: true });
+    return true;
+  }
   if (url.pathname === '/api/_/agent/chat' && req.method === 'POST') {
     const { data } = await readBody(req);
-    json(res, 200, { ok: true, data: await runLocalAgent(data) });
+    await runAgentStream(req, res, data);
+    return true;
+  }
+  if (url.pathname === '/api/_/agent/threads' && req.method === 'GET') {
+    const threads = getAgentThreads();
+    json(res, 200, { ok: true, data: threads });
+    return true;
+  }
+  if (url.pathname === '/api/_/agent/threads' && req.method === 'POST') {
+    const { data } = await readBody(req);
+    const id = createAgentThread(data?.agentId || 'llm');
+    json(res, 200, { ok: true, data: { id } });
+    return true;
+  }
+  if (url.pathname.startsWith('/api/_/agent/threads/') && url.pathname.endsWith('/messages') && req.method === 'GET') {
+    const threadId = url.pathname.split('/')[4];
+    const messages = getAgentMessages(threadId);
+    json(res, 200, { ok: true, data: messages });
+    return true;
+  }
+  if (url.pathname.startsWith('/api/_/agent/threads/') && req.method === 'DELETE') {
+    const threadId = url.pathname.split('/')[4];
+    deleteAgentThread(threadId);
+    json(res, 200, { ok: true });
+    return true;
+  }
+  if (url.pathname.startsWith('/api/_/agent/threads/') && req.method === 'PATCH') {
+    const threadId = url.pathname.split('/')[4];
+    const { data } = await readBody(req);
+    if (data?.name) updateAgentThreadName(threadId, data.name);
+    json(res, 200, { ok: true });
+    return true;
+  }
+  if (url.pathname.startsWith('/api/_/agent/messages/') && req.method === 'DELETE') {
+    const messageId = Number(url.pathname.split('/')[4]);
+    const threadId = url.searchParams.get('threadId');
+    deleteAgentMessage(messageId, threadId);
+    json(res, 200, { ok: true });
     return true;
   }
   if (url.pathname === '/api/_/snapshot/run' && req.method === 'POST') {
@@ -7020,7 +7288,7 @@ function describeCronResult(taskType, result) {
     return `\n已向 ${result?.platformCount || 0} 个平台推送热榜日报。`;
   }
   if (taskType === 'tracker-refresh') {
-    return `\n勾选 ${result.selected || 0} 个账号，同步成功 ${result.synced || 0} 个，“自己”账号诊断 ${result.diagnosed || 0} 个，失败 ${result.failed?.length || 0} 个。`;
+    return `\n勾选 ${result.selected || 0} 个账号，同步成功 ${result.synced || 0} 个，"自己"账号诊断 ${result.diagnosed || 0} 个，失败 ${result.failed?.length || 0} 个。`;
   }
   if (taskType === 'wersss-sync') {
     const status = result.ok ? '成功' : '部分失败';

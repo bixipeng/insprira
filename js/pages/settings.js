@@ -23,6 +23,7 @@ export async function renderSettings() {
     llmPill.innerHTML = `<i data-lucide="${status.llmConfigured ? 'check' : 'x'}" class="w-3 h-3"></i>${status.llmConfigured ? '已配置' : '未配置'}`;
     document.getElementById('api-detail').textContent = '配置变更后需重启服务生效';
     await loadQuota();
+    await loadAgentConfigs();
     await renderCronList();
     await renderNotificationSettings();
     initIcons(document.getElementById('content-area'));
@@ -637,5 +638,163 @@ export async function toggleInspirationConfig(id) {
     await localApi(`inspiration-configs/${id}/toggle`, { method: 'POST', body: { enabled: !config.enabled } });
     toast(config.enabled ? '已暂停自动生成' : '已恢复自动生成', 'success');
     await renderSettings();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+// ============= Agent 配置管理 =============
+
+let _agentConfigsCache = [];
+
+export async function loadAgentConfigs() {
+  try {
+    _agentConfigsCache = await localApi('agent/configs');
+  } catch { _agentConfigsCache = []; }
+  renderAgentConfigTable();
+}
+
+function renderAgentConfigTable() {
+  const tbody = document.getElementById('agent-config-tbody');
+  if (!tbody) return;
+  if (!_agentConfigsCache.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-gray-500">暂无 Agent 配置，点击"新建 Agent"创建</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _agentConfigsCache.map(cfg => `
+    <tr class="border-b border-white/5 hover:bg-white/[0.02]">
+      <td class="py-2.5 px-2">
+        <div class="font-medium">${esc(cfg.name)}</div>
+        <div class="text-[10px] text-gray-500">${esc(cfg.id)}</div>
+      </td>
+      <td class="py-2.5 px-2 text-gray-300">${esc(cfg.agent_id)}</td>
+      <td class="py-2.5 px-2">
+        <code class="text-[10px] text-purple-300 bg-purple-500/10 px-1.5 py-0.5 rounded max-w-[180px] truncate block" title="${esc(cfg.url)}">${esc(cfg.url.replace(/^https?:\/\//, ''))}</code>
+      </td>
+      <td class="py-2.5 px-2">
+        <code class="text-[10px] text-cyan-300">${esc(cfg.token || '—')}</code>
+      </td>
+      <td class="py-2.5 px-2">
+        <span class="pill ${cfg.enabled && cfg.token ? 'pill-green' : 'pill-hot'}">${cfg.enabled && cfg.token ? '已启用' : (cfg.enabled ? '缺 Token' : '已禁用')}</span>
+      </td>
+      <td class="py-2.5 px-2 text-right">
+        <div class="flex gap-1 justify-end">
+          <button class="btn btn-ghost py-1 px-2 text-xs" data-action="editAgentConfig" data-id="${esc(cfg.id)}" title="编辑"><i data-lucide="pencil" class="w-3 h-3"></i></button>
+          <button class="btn btn-ghost py-1 px-2 text-xs ${cfg.enabled ? 'text-amber-400' : 'text-emerald-400'}" data-action="toggleAgentConfig" data-id="${esc(cfg.id)}" title="${cfg.enabled ? '禁用' : '启用'}"><i data-lucide="${cfg.enabled ? 'pause' : 'play'}" class="w-3 h-3"></i></button>
+          <button class="btn btn-ghost py-1 px-2 text-xs text-red-400" data-action="deleteAgentConfig" data-id="${esc(cfg.id)}" title="删除"><i data-lucide="trash-2" class="w-3 h-3"></i></button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+  initIcons(tbody);
+}
+
+export function openAgentConfigModal(editId = '') {
+  const cfg = editId ? _agentConfigsCache.find(c => c.id === editId) : null;
+  const modal = document.createElement('div');
+  modal.className = 'modal-mask';
+  modal.innerHTML = `<div class="modal" style="max-width:600px;max-height:90vh;overflow:auto">
+    <div class="flex items-center justify-between mb-4">
+      <div><h2 class="text-lg font-bold">${editId ? '编辑 Agent' : '新建 Agent'}</h2><p class="text-[11px] text-gray-500 mt-1">对接已部署的 Agent 网关（Openclaw / OpenAI 兼容 API）</p></div>
+      <button class="btn btn-ghost py-1 px-2" data-action="closeModal"><i data-lucide="x" class="w-4 h-4"></i></button>
+    </div>
+    <form id="agent-config-form" class="space-y-3">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">Agent ID <span class="text-red-400">*</span></label>
+          <input class="input font-mono text-xs" id="ac-id" placeholder="例如 openclaw" ${editId ? 'disabled' : ''} value="${esc(cfg?.id || '')}" />
+          <p class="text-[10px] text-gray-600 mt-0.5">唯一标识，仅小写字母、数字、连字符和下划线</p>
+        </div>
+        <div>
+          <label class="text-xs text-gray-400 mb-1 block">显示名称 <span class="text-red-400">*</span></label>
+          <input class="input text-xs" id="ac-name" placeholder="例如 Openclaw · 默认" value="${esc(cfg?.name || '')}" />
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Agent 网关地址</label>
+        <input class="input font-mono text-xs" id="ac-url" placeholder="http://127.0.0.1:18789" value="${esc(cfg?.url || 'http://127.0.0.1:18789')}" />
+        <p class="text-[10px] text-gray-600 mt-0.5">Openclaw 或其他 OpenAI 兼容 Agent 服务的地址</p>
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Token</label>
+        <input class="input font-mono text-xs" type="password" autocomplete="new-password" id="ac-token" placeholder="${editId ? '留空保留原 Token' : 'n4qekyrbznek665t...'}" />
+        ${editId && cfg?.token ? '<p class="text-[10px] text-gray-600 mt-0.5">当前 Token：' + esc(cfg.token) + '</p>' : ''}
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">Agent ID（model 参数）</label>
+        <input class="input font-mono text-xs" id="ac-agent-id" placeholder="openclaw/default" value="${esc(cfg?.agent_id || 'openclaw/default')}" />
+        <p class="text-[10px] text-gray-600 mt-0.5">传给 /v1/chat/completions 的 model 字段，如 openclaw/default、openclaw/research</p>
+      </div>
+      <div>
+        <label class="text-xs text-gray-400 mb-1 block">System Prompt <span class="text-gray-600">（可选，留空使用默认）</span></label>
+        <textarea class="input min-h-[80px] resize-y text-xs" id="ac-system-prompt" placeholder="自定义 System Prompt...">${esc(cfg?.system_prompt || '')}</textarea>
+      </div>
+      <div class="flex items-center gap-2">
+        <label class="flex items-center gap-2 cursor-pointer text-sm">
+          <input type="checkbox" id="ac-enabled" class="accent-purple-500" ${editId ? (cfg?.enabled ? 'checked' : '') : 'checked'} />
+          <span>启用</span>
+        </label>
+      </div>
+      <div class="flex justify-end gap-2 pt-2">
+        <button type="button" class="btn btn-ghost text-xs" data-action="closeModal">取消</button>
+        <button type="submit" class="btn btn-primary text-xs"><i data-lucide="save" class="w-3.5 h-3.5"></i>保存</button>
+      </div>
+    </form>
+  </div>`;
+  document.body.appendChild(modal);
+  window._agentConfigModal = modal;
+  initIcons(modal);
+  modal.querySelector('#agent-config-form').addEventListener('submit', e => {
+    e.preventDefault();
+    submitAgentConfig(editId);
+  });
+}
+
+export async function submitAgentConfig(editId) {
+  const id = editId || document.getElementById('ac-id').value.trim();
+  const name = document.getElementById('ac-name').value.trim();
+  const url = document.getElementById('ac-url').value.trim();
+  const token = document.getElementById('ac-token').value;
+  const agentId = document.getElementById('ac-agent-id').value.trim();
+  const systemPrompt = document.getElementById('ac-system-prompt').value;
+  const enabled = document.getElementById('ac-enabled').checked ? 1 : 0;
+
+  if (!id || !name) { toast('Agent ID 和名称不能为空', 'error'); return; }
+  if (!/^[a-z0-9_-]+$/.test(id)) { toast('Agent ID 只能包含小写字母、数字、连字符和下划线', 'error'); return; }
+  if (!editId && !token) { toast('新建 Agent 必须填写 Token', 'error'); return; }
+
+  const body = { id, name, url: url || 'http://127.0.0.1:18789', token, agentId: agentId || 'openclaw/default', systemPrompt, enabled };
+  try {
+    if (editId) {
+      // 更新时，Token 留空则不修改
+      if (!token) delete body.token;
+      await localApi(`agent/configs/${encodeURIComponent(editId)}`, { method: 'PUT', body });
+    } else {
+      await localApi('agent/configs', { method: 'POST', body });
+    }
+    window._agentConfigModal?.remove();
+    toast(editId ? 'Agent 配置已更新' : 'Agent 已创建', 'success');
+    await loadAgentConfigs();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function editAgentConfig(id) {
+  openAgentConfigModal(id);
+}
+
+export async function toggleAgentConfig(id) {
+  const cfg = _agentConfigsCache.find(c => c.id === id);
+  if (!cfg) return;
+  try {
+    await localApi(`agent/configs/${encodeURIComponent(id)}`, { method: 'PUT', body: { enabled: cfg.enabled ? 0 : 1 } });
+    toast(cfg.enabled ? '已禁用' : '已启用', 'success');
+    await loadAgentConfigs();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+export async function deleteAgentConfig(id) {
+  if (!confirm(`确定删除 Agent "${id}"？该 Agent 下的所有对话线程也会被删除。`)) return;
+  try {
+    await localApi(`agent/configs/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    toast('已删除', 'success');
+    await loadAgentConfigs();
   } catch (e) { toast(e.message, 'error'); }
 }
