@@ -2266,7 +2266,7 @@ function getAgentMessages(threadId) {
 function saveAgentMessage(threadId, role, content) {
   const now = Date.now();
   db.prepare(`INSERT INTO agent_messages (thread_id, role, content, created_at) VALUES (?, ?, ?, ?)`).run(threadId, role, content, now);
-  db.prepare(`UPDATE agent_threads SET updated_at = ?, name = CASE WHEN name = '新对话' AND role = 'user' THEN substr(?, 1, 20) ELSE name END WHERE id = ?`).run(now, content.replace(/\n/g, ' '), threadId);
+  db.prepare(`UPDATE agent_threads SET updated_at = ?, name = CASE WHEN name = '新对话' AND ? = 'user' THEN substr(?, 1, 20) ELSE name END WHERE id = ?`).run(now, role, content.replace(/\n/g, ' '), threadId);
 }
 
 function deleteAgentThread(threadId) {
