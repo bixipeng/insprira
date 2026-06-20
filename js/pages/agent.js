@@ -151,27 +151,53 @@ export async function checkSkillUpdates(showToast = true) {
 
 export async function updateCommunitySkillsUi() {
   const button = document.getElementById('skill-update-button');
-  if (button) {
-    button.disabled = true;
-    button.innerHTML = '<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>更新中…';
+  const statusEl = document.getElementById('skill-update-status');
+  const grid = document.getElementById('skill-grid');
+
+  const setStatus = (text, cls = 'text-[11px] text-gray-500') => {
+    if (statusEl) { statusEl.textContent = text; statusEl.className = cls; }
+  };
+  const setButton = (text, disabled) => {
+    if (!button) return;
+    button.disabled = disabled;
+    button.innerHTML = text;
     initIcons(button);
-  }
+  };
+
+  setButton('<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>检查更新…', true);
+  setStatus('正在检查更新…');
   try {
+    const status = await localApi('skills/status');
+    if (!status.available) {
+      setStatus('已是最新版本', 'text-[11px] text-emerald-300');
+      setButton('<i data-lucide="download" class="w-3.5 h-3.5"></i>一键更新', false);
+      button?.classList.add('hidden');
+      toast('Skill 已是最新版本', 'success');
+      return;
+    }
+
+    setButton(`<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>下载中…`, true);
+    setStatus(`正在下载更新 (新增 ${status.added.length}、修改 ${status.changed.length})…`);
+
     const result = await localApi('skills/update', { method: 'POST', body: {} });
     skillUpdateStatus = { ...result, available: false };
+
+    setButton('<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i>刷新列表…', true);
+    setStatus('正在刷新 Skill 列表…');
+    if (grid) grid.innerHTML = '<div class="col-span-full text-sm text-gray-500 py-8 text-center"><i data-lucide="loader-circle" class="w-4 h-4 animate-spin inline-block mr-2"></i>加载中…</div>';
+    initIcons(grid);
+
     await loadSkills(true);
     document.getElementById('skill-local-count').textContent = `${skillCache.length} 个已下载`;
     filterSkills();
     renderSkillUpdateStatus();
-    toast(result.updated ? `Skill 更新完成，新增 ${result.addedSlugs.length} 个` : 'Skill 已是最新版本', 'success');
+
+    const addedCount = result.addedSlugs?.length || 0;
+    toast(addedCount ? `Skill 更新完成，新增 ${addedCount} 个` : 'Skill 已是最新版本', 'success');
   } catch (e) {
+    setStatus('更新失败', 'text-[11px] text-red-400');
+    setButton('<i data-lucide="download" class="w-3.5 h-3.5"></i>一键更新', false);
     toast(e.message, 'error');
-  } finally {
-    if (button) {
-      button.disabled = false;
-      button.innerHTML = '<i data-lucide="download" class="w-3.5 h-3.5"></i>一键更新';
-      initIcons(button);
-    }
   }
 }
 
