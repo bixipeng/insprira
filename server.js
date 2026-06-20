@@ -2259,7 +2259,10 @@ function saveAgentMessage(threadId, role, content) {
 }
 
 function deleteAgentThread(threadId) {
-  db.prepare(`DELETE FROM agent_threads WHERE id = ?`).run(threadId);
+  const before = db.prepare('SELECT COUNT(*) as c FROM agent_threads').get().c;
+  const result = db.prepare(`DELETE FROM agent_threads WHERE id = ?`).run(threadId);
+  const after = db.prepare('SELECT COUNT(*) as c FROM agent_threads').get().c;
+  console.log('deleteAgentThread', `threadId=${threadId} before=${before} changes=${result.changes} after=${after}`);
 }
 
 function updateAgentThreadName(threadId, name) {
