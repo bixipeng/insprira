@@ -232,7 +232,7 @@ const CACHE_TTL = {
 
 const DB_PATH = process.env.CACHE_DB_PATH
   ? path.resolve(process.env.CACHE_DB_PATH)
-  : path.join(__dirname, 'cache.db');
+  : (process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'cache.db') : path.join(__dirname, 'cache.db'));
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -2258,7 +2258,7 @@ function getAgentThreads() {
 }
 
 function getAgentMessages(threadId) {
-  return db.prepare(`SELECT * FROM agent_messages WHERE thread_id = ? ORDER BY created_at ASC`).all().map(m => ({
+  return db.prepare(`SELECT * FROM agent_messages WHERE thread_id = ? ORDER BY created_at ASC`).all(threadId).map(m => ({
     id: m.id, threadId: m.thread_id, role: m.role, content: m.content, timestamp: m.created_at,
   }));
 }
